@@ -228,10 +228,7 @@ fn test_amnezia_junk_parameters() {
     let mut buffer = vec![0; msg.buffer_len()];
     msg.emit(&mut buffer);
 
-    // Checking Amnezia Specific bytes
-    // JunkCount (JC) should be 11 (0x0b)
-    // Netlink Attribute: [Length (2 bytes), Type (2 bytes), Value (n bytes)]
-
+    // Each window is one NLA: u16 length, u16 kind, u16 payload. WGDEVICE_A_JC is kind 9.
     assert!(
         buffer
             .windows(6)
@@ -657,4 +654,122 @@ fn test_device_peer_wire_format() {
 
     let parsed = AmneziaWireguardAttribute::parse(&NlaBuffer::new(&buf)).unwrap();
     assert_eq!(parsed, attr);
+}
+
+// Kinds neither crate knows, such as the zero-length WGPEER_A_ADVANCED_SECURITY flag (11) the
+// AmneziaWG module puts into WG_CMD_UNKNOWN_PEER, must survive parsing and emit unchanged.
+#[test]
+fn test_unknown_attributes_roundtrip_as_other() {
+    use netlink_packet_core::NlaBuffer;
+
+    // WGDEVICE_A_PEER | NLA_F_NESTED, len = 4 + 4 + 8, holding WGPEER_A_ADVANCED_SECURITY
+    // (11, no payload) and an unknown kind 99 with a 4-byte payload.
+    let peer = [
+        0x10, 0x00, 0x12, 0x80, 0x04, 0x00, 0x0b, 0x00, 0x08, 0x00, 0x63, 0x00, 0xde, 0xad, 0xbe,
+        0xef,
+    ];
+    // Unknown device kind 99 with a 4-byte payload.
+    let device = [0x08, 0x00, 0x63, 0x00, 0x01, 0x02, 0x03, 0x04];
+
+    for wire in [&peer[..], &device[..]] {
+        let attr = AmneziaWireguardAttribute::parse(&NlaBuffer::new(&wire)).unwrap();
+        let mut buf = vec![0; attr.buffer_len()];
+        attr.emit(&mut buf);
+        assert_eq!(buf, wire);
+    }
+
+    let parsed = AmneziaWireguardAttribute::parse(&NlaBuffer::new(&&peer[..])).unwrap();
+    let AmneziaWireguardAttribute::Peer(peer) = parsed else {
+        panic!("expected WGDEVICE_A_PEER, got {parsed:?}");
+    };
+    assert_eq!(peer.len(), 2);
+    assert!(
+        peer.iter()
+            .all(|attr| matches!(attr, AmneziaWireguardPeerAttribute::Other(_)))
+    );
+}
+
+// The genl header carries the family version, which fixes the magic header wire type: an 8-byte
+// u64 range from a version 3 module stays a range even when its bytes read as a digit string.
+#[test]
+fn test_magic_header_decoded_by_family_version() {
+    // WGDEVICE_A_H1 (14), len = 4 + 8, payload b"1234567\0" as a little-endian u64 range.
+    let wire = [
+        0x0c, 0x00, 0x0e, 0x00, b'1', b'2', b'3', b'4', b'5', b'6', b'7', 0x00,
+    ];
+    let parse = |version| {
+        AmneziaWireguardMessage::parse_with_param(
+            &wire,
+            GenlHeader {
+                cmd: AmneziaWireguardCmd::GetDevice.into(),
+                version,
+            },
+        )
+        .unwrap()
+        .attributes
+    };
+
+    assert_eq!(
+        parse(3),
+        vec![AmneziaWireguardAttribute::H1("875770417-3618357".into())]
+    );
+    assert_eq!(
+        parse(2),
+        vec![AmneziaWireguardAttribute::H1("1234567".into())]
+    );
+
+    // A version 1 module sends a bare u32; 0x00333231 reads as b"123\0".
+    let legacy = [0x08, 0x00, 0x0e, 0x00, b'1', b'2', b'3', 0x00];
+    let parsed = AmneziaWireguardMessage::parse_with_param(
+        &legacy,
+        GenlHeader {
+            cmd: AmneziaWireguardCmd::GetDevice.into(),
+            version: 1,
+        },
+    )
+    .unwrap();
+    assert_eq!(
+        parsed.attributes,
+        vec![AmneziaWireguardAttribute::H1("3355185".into())]
+    );
+}
+
+// An attribute parsed on its own has no genl header, so the magic header wire type is guessed
+// from the payload length.
+#[test]
+fn test_magic_header_type_guessed_without_family_version() {
+    use netlink_packet_core::NlaBuffer;
+
+    use crate::range::u32_range_pack;
+
+    let parse = |payload: &[u8]| {
+        let mut wire = vec![(4 + payload.len()) as u8, 0x00, 0x0e, 0x00];
+        wire.extend_from_slice(payload);
+        AmneziaWireguardAttribute::parse(&NlaBuffer::new(&wire))
+    };
+
+    assert_eq!(
+        parse(&123u32.to_le_bytes()).unwrap(),
+        AmneziaWireguardAttribute::H1("123".into())
+    );
+    assert_eq!(
+        parse(&u32_range_pack(5, 9).to_le_bytes()).unwrap(),
+        AmneziaWireguardAttribute::H1("5-9".into())
+    );
+    assert!(parse(&[1, 2]).is_err());
+}
+
+#[test]
+fn test_genl_family() {
+    use netlink_packet_generic::GenlFamily;
+
+    let message = |cmd| AmneziaWireguardMessage {
+        cmd,
+        attributes: vec![],
+    };
+
+    assert_eq!(AmneziaWireguardMessage::family_name(), "amneziawg");
+    assert_eq!(message(AmneziaWireguardCmd::GetDevice).version(), 2);
+    assert_eq!(message(AmneziaWireguardCmd::GetDevice).command(), 0);
+    assert_eq!(message(AmneziaWireguardCmd::SetDevice).command(), 1);
 }

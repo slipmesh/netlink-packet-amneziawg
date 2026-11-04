@@ -54,8 +54,22 @@ const WGDEVICE_A_DISABLE_COOKIES: u16 = 34;
 /// - original AmneziaWG (genl version 1): bare `u32`.
 ///
 /// All representations are normalized to the string form used by the v1.0
-/// module and by `awg`(8) config files.
-fn parse_magic_header(payload: &[u8]) -> Result<String, DecodeError> {
+/// module and by `awg`(8) config files. A known `family_version` fixes the
+/// wire type; without it the type is guessed from the payload.
+fn parse_magic_header(payload: &[u8], family_version: Option<u8>) -> Result<String, DecodeError> {
+    match family_version {
+        Some(1) => {
+            return Ok(parse_u32(payload)
+                .context("invalid u32 magic header value")?
+                .to_string());
+        }
+        Some(3..) => {
+            return Ok(u32_range_to_string(
+                parse_u64(payload).context("invalid u64 magic header value")?,
+            ));
+        }
+        _ => {}
+    }
     // A v1.0 string of exactly 7 digits plus NUL is also 8 bytes long, so
     // the string check must come first. Magic header specs only contain
     // decimal digits and at most one '-', which a binary range practically
@@ -175,7 +189,6 @@ impl AmneziaWireguardAttribute {
             WireguardAttribute::ListenPort(v) => Self::ListenPort(v),
             WireguardAttribute::Fwmark(v) => Self::Fwmark(v),
             WireguardAttribute::Flags(v) => Self::Flags(v),
-            WireguardAttribute::Other(v) => Self::Other(v),
             _ => return None,
         })
     }
@@ -319,6 +332,17 @@ impl Nla for AmneziaWireguardAttribute {
 
 impl<'a, T: AsRef<[u8]> + ?Sized> Parseable<NlaBuffer<&'a T>> for AmneziaWireguardAttribute {
     fn parse(buf: &NlaBuffer<&'a T>) -> Result<Self, DecodeError> {
+        Self::parse_for_family_version(buf, None)
+    }
+}
+
+impl AmneziaWireguardAttribute {
+    /// Parses with the genl family version from the message header, which
+    /// decides the magic header wire type.
+    pub(crate) fn parse_for_family_version<T: AsRef<[u8]> + ?Sized>(
+        buf: &NlaBuffer<&T>,
+        family_version: Option<u8>,
+    ) -> Result<Self, DecodeError> {
         let payload = buf.value();
         let u16_attr =
             |name: &'static str| parse_u16(payload).context(format!("invalid {name} value"));
@@ -327,7 +351,7 @@ impl<'a, T: AsRef<[u8]> + ?Sized> Parseable<NlaBuffer<&'a T>> for AmneziaWiregua
         let string_attr =
             |name: &'static str| parse_string(payload).context(format!("invalid {name} value"));
         let magic_header = |name: &'static str| {
-            parse_magic_header(payload).context(format!("invalid {name} value"))
+            parse_magic_header(payload, family_version).context(format!("invalid {name} value"))
         };
         let flag_attr = |name: &'static str| {
             parse_u8(payload)
@@ -335,8 +359,14 @@ impl<'a, T: AsRef<[u8]> + ?Sized> Parseable<NlaBuffer<&'a T>> for AmneziaWiregua
                 .map(|v| v != 0)
         };
         Ok(match buf.kind() {
-            WGDEVICE_A_PEERS => Self::Peers(AmneziaWireguardPeers::parse(buf)?.0),
-            WGDEVICE_A_PEER => Self::Peer(AmneziaWireguardPeer::parse(buf)?),
+            WGDEVICE_A_PEERS => Self::Peers(
+                AmneziaWireguardPeers::parse(buf)
+                    .context("invalid WGDEVICE_A_PEERS value")?
+                    .0,
+            ),
+            WGDEVICE_A_PEER => Self::Peer(
+                AmneziaWireguardPeer::parse(buf).context("invalid WGDEVICE_A_PEER value")?,
+            ),
             WGDEVICE_A_JC => Self::JC(u16_attr("WGDEVICE_A_JC")?),
             WGDEVICE_A_JMIN => Self::Jmin(u16_attr("WGDEVICE_A_JMIN")?),
             WGDEVICE_A_JMAX => Self::Jmax(u16_attr("WGDEVICE_A_JMAX")?),
