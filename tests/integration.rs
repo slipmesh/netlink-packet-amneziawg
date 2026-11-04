@@ -119,9 +119,9 @@ async fn send_request(
     nlmsg.header.flags = flags;
 
     let mut responses = Vec::new();
-    let mut stream = handle.request(nlmsg).await.unwrap();
+    let mut stream = handle.request(nlmsg).await.map_err(std::io::Error::other)?;
     while let Some(result) = stream.next().await {
-        let rx = result.unwrap();
+        let rx = result.map_err(std::io::Error::other)?;
         match rx.payload {
             NetlinkPayload::InnerMessage(genl) => {
                 responses.push(genl.payload);
