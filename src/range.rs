@@ -52,6 +52,12 @@ mod tests {
     use super::*;
 
     #[test]
+    fn test_pack_puts_lo_in_the_low_half() {
+        assert_eq!(u32_range_pack(1, 2), 0x0000_0002_0000_0001);
+        assert_eq!(u32_range_unpack(0x0000_0002_0000_0001), (1, 2));
+    }
+
+    #[test]
     fn test_pack_unpack_roundtrip() {
         let v = u32_range_pack(61220074, 118999195);
         assert_eq!(u32_range_unpack(v), (61220074, 118999195));

@@ -20,9 +20,11 @@ base64 = "0.22.1"
 env_logger = "0.11.10"
 futures = "0.3.16"
 getrandom = "0.4.2"
+hex-literal = "1.1"
 pretty_assertions = "1.4.1"
 
 [target.'cfg(target_os = "linux")'.dev-dependencies]
 genetlink = "0.3.1"
-libc = "0.2.98"
+nix = { version = "0.31", features = ["user"] }
+rtnetlink = "0.24"
 tokio = { version = "1.9.0", features = ["macros", "rt-multi-thread"] }

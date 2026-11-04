@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: MIT
 
 use std::{
-    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV6},
+    net::{IpAddr, Ipv4Addr, Ipv6Addr},
     str::FromStr,
 };
 
+use hex_literal::hex;
 use netlink_packet_core::{Emitable, Parseable, ParseableParametrized};
 use netlink_packet_generic::GenlHeader;
 use pretty_assertions::assert_eq;
@@ -15,18 +16,6 @@ use crate::{
     AmneziaWireguardMessage, AmneziaWireguardPeer, AmneziaWireguardPeerAttribute,
     AmneziaWireguardPeerFlags, AmneziaWireguardTimeSpec,
 };
-
-fn roundtrip_msg(msg: AmneziaWireguardMessage) -> AmneziaWireguardMessage {
-    let header = GenlHeader {
-        cmd: msg.cmd.into(),
-        version: 2,
-    };
-    let header_len = header.buffer_len();
-    let mut buffer = vec![0; msg.buffer_len() + header_len];
-    header.emit(&mut buffer);
-    msg.emit(&mut buffer[header_len..]);
-    AmneziaWireguardMessage::parse_with_param(&buffer[header_len..], header).unwrap()
-}
 
 // nlmon capture of netlink packet sent by `sudo wg` command with netlink
 // header purged(generic netlink command is first byte).
@@ -212,208 +201,24 @@ fn test_setconf_against_exiting_wg() {
     assert_eq!(&buffer, &raw);
 }
 
-#[test]
-fn test_amnezia_junk_parameters() {
-    // Message with Amnezia Specific Junk params
-    let msg: AmneziaWireguardMessage = AmneziaWireguardMessage {
-        cmd: AmneziaWireguardCmd::SetDevice,
-        attributes: vec![
-            AmneziaWireguardAttribute::IfName("awg0".into()),
-            AmneziaWireguardAttribute::JC(4),
-            AmneziaWireguardAttribute::Jmin(40),
-            AmneziaWireguardAttribute::Jmax(70),
-        ],
-    };
-
-    let mut buffer = vec![0; msg.buffer_len()];
-    msg.emit(&mut buffer);
-
-    // Each window is one NLA: u16 length, u16 kind, u16 payload. WGDEVICE_A_JC is kind 9.
-    assert!(
-        buffer
-            .windows(6)
-            .any(|w| w == [0x06, 0x00, 0x09, 0x00, 0x04, 0x00]),
-        "JC failed"
-    );
-
-    assert!(
-        buffer
-            .windows(6)
-            .any(|w| w == [0x06, 0x00, 0x0a, 0x00, 0x28, 0x00]),
-        "Jmin failed"
-    );
+/// One netlink attribute as it goes on the wire: length, kind, payload, padding to 4 bytes.
+fn nla(kind: u16, payload: &[u8]) -> Vec<u8> {
+    let mut wire = Vec::new();
+    wire.extend_from_slice(&((4 + payload.len()) as u16).to_le_bytes());
+    wire.extend_from_slice(&kind.to_le_bytes());
+    wire.extend_from_slice(payload);
+    wire.resize(wire.len().next_multiple_of(4), 0);
+    wire
 }
 
-#[test]
-fn test_amnezia_magic_headers() {
-    let msg: AmneziaWireguardMessage = AmneziaWireguardMessage {
-        cmd: AmneziaWireguardCmd::SetDevice,
-        attributes: vec![
-            AmneziaWireguardAttribute::H1("61220074".into()),
-            AmneziaWireguardAttribute::S1(0x5566),
-        ],
+fn parse_msg(attributes: &[u8], version: u8) -> Vec<AmneziaWireguardAttribute> {
+    let header = GenlHeader {
+        cmd: AmneziaWireguardCmd::GetDevice.into(),
+        version,
     };
-
-    let mut buffer = vec![0; msg.buffer_len()];
-    msg.emit(&mut buffer);
-
-    // H1 (type 14 / 0x0e): string "61220074" + null, total attr len = 13
-    assert!(
-        buffer
-            .windows(13)
-            .any(|w| w == b"\x0d\x00\x0e\x0061220074\x00")
-    );
-
-    // S1 (type 12 / 0x0c, length 6): [06, 00, 0c, 00, 66, 55]
-    assert!(
-        buffer
-            .windows(6)
-            .any(|w| w == [0x06, 0x00, 0x0c, 0x00, 0x66, 0x55])
-    );
-}
-
-#[test]
-fn test_set_device_roundtrip() {
-    let msg = AmneziaWireguardMessage {
-        cmd: AmneziaWireguardCmd::SetDevice,
-        attributes: vec![
-            AmneziaWireguardAttribute::IfName("awg0".into()),
-            AmneziaWireguardAttribute::ListenPort(51820),
-            AmneziaWireguardAttribute::Fwmark(1234),
-            AmneziaWireguardAttribute::Flags(AmneziaWireguardDeviceFlags::ReplacePeers),
-        ],
-    };
-
-    assert_eq!(msg, roundtrip_msg(msg.clone()));
-}
-
-#[test]
-fn test_all_amnezia_attributes_emit_and_roundtrip() {
-    let msg = AmneziaWireguardMessage {
-        cmd: AmneziaWireguardCmd::SetDevice,
-        attributes: vec![
-            AmneziaWireguardAttribute::JC(1),
-            AmneziaWireguardAttribute::Jmin(10),
-            AmneziaWireguardAttribute::Jmax(100),
-            AmneziaWireguardAttribute::S1(0x0102),
-            AmneziaWireguardAttribute::S2(0x0304),
-            AmneziaWireguardAttribute::S3(0x0506),
-            AmneziaWireguardAttribute::S4(0x0708),
-            AmneziaWireguardAttribute::H1("61220074".into()),
-            AmneziaWireguardAttribute::H2("2351746464".into()),
-            AmneziaWireguardAttribute::H3("3053333659".into()),
-            AmneziaWireguardAttribute::H4("1789444460".into()),
-            AmneziaWireguardAttribute::I1("<r 2>".into()),
-            AmneziaWireguardAttribute::I2("".into()),
-            AmneziaWireguardAttribute::I3("".into()),
-            AmneziaWireguardAttribute::I4("".into()),
-            AmneziaWireguardAttribute::I5("".into()),
-        ],
-    };
-
-    let parsed = roundtrip_msg(msg.clone());
-    assert_eq!(msg, parsed);
-}
-
-#[test]
-fn test_awg31_device_attributes_roundtrip() {
-    let msg = AmneziaWireguardMessage {
-        cmd: AmneziaWireguardCmd::SetDevice,
-        attributes: vec![
-            AmneziaWireguardAttribute::IfName("awg0".into()),
-            AmneziaWireguardAttribute::RandomTrailers(true),
-            AmneziaWireguardAttribute::DisableCookies(false),
-        ],
-    };
-
-    assert_eq!(msg, roundtrip_msg(msg.clone()));
-}
-
-#[test]
-fn test_awg31_attribute_wire_format() {
-    use netlink_packet_core::NlaBuffer;
-
-    let attr = AmneziaWireguardAttribute::RandomTrailers(true);
-    let mut buf = vec![0; attr.buffer_len()];
-    attr.emit(&mut buf);
-    // NLA header: len = 5 (4 header + 1 payload), kind = 33, then the u8
-    // payload zero-padded to 4-byte alignment.
-    assert_eq!(buf, vec![0x05, 0x00, 0x21, 0x00, 0x01, 0x00, 0x00, 0x00]);
-
-    let parsed = AmneziaWireguardAttribute::parse(&NlaBuffer::new(&buf)).unwrap();
-    assert_eq!(parsed, AmneziaWireguardAttribute::RandomTrailers(true));
-}
-
-#[test]
-fn test_allowed_ips_ipv6_roundtrip() {
-    let msg = AmneziaWireguardMessage {
-        cmd: AmneziaWireguardCmd::SetDevice,
-        attributes: vec![AmneziaWireguardAttribute::Peers(vec![
-            AmneziaWireguardPeer(vec![
-                AmneziaWireguardPeerAttribute::PublicKey([42u8; 32]),
-                AmneziaWireguardPeerAttribute::AllowedIps(vec![AmneziaWireguardAllowedIp(vec![
-                    AmneziaWireguardAllowedIpAttr::Family(AmneziaWireguardAddressFamily::Ipv6),
-                    AmneziaWireguardAllowedIpAttr::IpAddr(IpAddr::V6(Ipv6Addr::UNSPECIFIED)),
-                    AmneziaWireguardAllowedIpAttr::Cidr(0),
-                ])]),
-            ]),
-        ])],
-    };
-
-    assert_eq!(msg, roundtrip_msg(msg.clone()));
-}
-
-#[test]
-fn test_multiple_allowed_ips_per_peer() {
-    let msg = AmneziaWireguardMessage {
-        cmd: AmneziaWireguardCmd::SetDevice,
-        attributes: vec![AmneziaWireguardAttribute::Peers(vec![
-            AmneziaWireguardPeer(vec![
-                AmneziaWireguardPeerAttribute::PublicKey([7u8; 32]),
-                AmneziaWireguardPeerAttribute::AllowedIps(vec![
-                    AmneziaWireguardAllowedIp(vec![
-                        AmneziaWireguardAllowedIpAttr::Family(AmneziaWireguardAddressFamily::Ipv4),
-                        AmneziaWireguardAllowedIpAttr::IpAddr(IpAddr::V4(Ipv4Addr::new(
-                            10, 0, 0, 0,
-                        ))),
-                        AmneziaWireguardAllowedIpAttr::Cidr(8),
-                    ]),
-                    AmneziaWireguardAllowedIp(vec![
-                        AmneziaWireguardAllowedIpAttr::Family(AmneziaWireguardAddressFamily::Ipv6),
-                        AmneziaWireguardAllowedIpAttr::IpAddr(IpAddr::V6(Ipv6Addr::new(
-                            0xfd00, 0, 0, 0, 0, 0, 0, 1,
-                        ))),
-                        AmneziaWireguardAllowedIpAttr::Cidr(128),
-                    ]),
-                ]),
-            ]),
-        ])],
-    };
-
-    assert_eq!(msg, roundtrip_msg(msg.clone()));
-}
-
-#[test]
-fn test_peer_with_endpoint_keepalive_and_flags() {
-    let msg = AmneziaWireguardMessage {
-        cmd: AmneziaWireguardCmd::SetDevice,
-        attributes: vec![AmneziaWireguardAttribute::Peers(vec![
-            AmneziaWireguardPeer(vec![
-                AmneziaWireguardPeerAttribute::PublicKey([1u8; 32]),
-                AmneziaWireguardPeerAttribute::PresharedKey([2u8; 32]),
-                AmneziaWireguardPeerAttribute::Endpoint(SocketAddr::V6(SocketAddrV6::new(
-                    Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1),
-                    51820,
-                    0,
-                    0,
-                ))),
-                AmneziaWireguardPeerAttribute::PersistentKeepalive(25),
-                AmneziaWireguardPeerAttribute::Flags(AmneziaWireguardPeerFlags::ReplaceAllowedIps),
-            ]),
-        ])],
-    };
-
-    assert_eq!(msg, roundtrip_msg(msg.clone()));
+    AmneziaWireguardMessage::parse_with_param(attributes, header)
+        .unwrap()
+        .attributes
 }
 
 #[test]
@@ -426,234 +231,172 @@ fn test_empty_peers_roundtrip() {
         ],
     };
 
-    assert_eq!(msg, roundtrip_msg(msg.clone()));
-}
-
-#[test]
-fn test_full_device_config_roundtrip() {
-    let private_key: [u8; 32] = [
-        0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24,
-        25, 26, 27, 28, 29, 30, 31,
-    ];
-    let public_key: [u8; 32] = [
-        31, 30, 29, 28, 27, 26, 25, 24, 23, 22, 21, 20, 19, 18, 17, 16, 15, 14, 13, 12, 11, 10, 9,
-        8, 7, 6, 5, 4, 3, 2, 1, 0,
-    ];
-
-    let msg = AmneziaWireguardMessage {
-        cmd: AmneziaWireguardCmd::SetDevice,
-        attributes: vec![
-            AmneziaWireguardAttribute::IfIndex(5),
-            AmneziaWireguardAttribute::IfName("awg0".into()),
-            AmneziaWireguardAttribute::PrivateKey(private_key),
-            AmneziaWireguardAttribute::PublicKey(public_key),
-            AmneziaWireguardAttribute::ListenPort(51820),
-            AmneziaWireguardAttribute::Fwmark(0),
-            AmneziaWireguardAttribute::Flags(AmneziaWireguardDeviceFlags::ReplacePeers),
-            // Amnezia parameters
-            AmneziaWireguardAttribute::JC(4),
-            AmneziaWireguardAttribute::Jmin(40),
-            AmneziaWireguardAttribute::Jmax(70),
-            AmneziaWireguardAttribute::S1(0x1234),
-            AmneziaWireguardAttribute::S2(0x5678),
-            AmneziaWireguardAttribute::H1("61220074".into()),
-            AmneziaWireguardAttribute::H2("6050999999".into()),
-            AmneziaWireguardAttribute::Peers(vec![AmneziaWireguardPeer(vec![
-                AmneziaWireguardPeerAttribute::PublicKey([0xabu8; 32]),
-                AmneziaWireguardPeerAttribute::Endpoint(SocketAddr::new(
-                    IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1)),
-                    51820,
-                )),
-                AmneziaWireguardPeerAttribute::PersistentKeepalive(25),
-                AmneziaWireguardPeerAttribute::AllowedIps(vec![AmneziaWireguardAllowedIp(vec![
-                    AmneziaWireguardAllowedIpAttr::Family(AmneziaWireguardAddressFamily::Ipv4),
-                    AmneziaWireguardAllowedIpAttr::IpAddr(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0))),
-                    AmneziaWireguardAllowedIpAttr::Cidr(0),
-                ])]),
-            ])]),
-        ],
-    };
-
-    assert_eq!(msg, roundtrip_msg(msg.clone()));
-}
-
-/// AmneziaWG 3.0 encodes magic headers as packed u64 ranges and keepalive
-/// as u32. Parsing must normalize these instead of failing.
-#[test]
-fn test_parse_v3_magic_headers_and_keepalive() {
-    use netlink_packet_core::NlaBuffer;
-
-    use crate::range::u32_range_pack;
-
-    // Device-level: H1 as u64 range, H2 as u64 single value (lo == hi).
-    let h1 = u32_range_pack(61220074, 118999195);
-    let h2 = u32_range_pack(4, 4);
-    let mut raw = Vec::new();
-    for (kind, value) in [(14u16, h1), (15u16, h2)] {
-        let len = (4 + 8) as u16;
-        raw.extend_from_slice(&len.to_le_bytes());
-        raw.extend_from_slice(&kind.to_le_bytes());
-        raw.extend_from_slice(&value.to_le_bytes());
-    }
-    let header = GenlHeader {
-        cmd: AmneziaWireguardCmd::GetDevice.into(),
-        version: 3,
-    };
-    let parsed = AmneziaWireguardMessage::parse_with_param(&raw, header).unwrap();
-    assert_eq!(
-        parsed.attributes,
-        vec![
-            AmneziaWireguardAttribute::H1("61220074-118999195".into()),
-            AmneziaWireguardAttribute::H2("4".into()),
-        ]
-    );
-
-    // Peer-level: keepalive as u32 (packed u16 range 25|25<<16).
-    let mut peer_nla = Vec::new();
-    let keepalive: u32 = 25 | (25 << 16);
-    let attr_len = (4 + 4) as u16;
-    peer_nla.extend_from_slice(&attr_len.to_le_bytes());
-    peer_nla.extend_from_slice(&5u16.to_le_bytes()); // WGPEER_A_PERSISTENT_KEEPALIVE_INTERVAL
-    peer_nla.extend_from_slice(&keepalive.to_le_bytes());
-    let buf = NlaBuffer::new_checked(&peer_nla[..]).unwrap();
-    let attr = AmneziaWireguardPeerAttribute::parse(&buf).unwrap();
-    assert_eq!(
-        attr,
-        AmneziaWireguardPeerAttribute::PersistentKeepaliveRange(25 | (25 << 16))
-    );
-}
-
-/// A 7-digit magic header string from a v1.0 module is also 8 bytes on the
-/// wire; it must be parsed as a string, not as a u64 range.
-#[test]
-fn test_parse_v1_magic_header_string_8_bytes() {
-    let mut raw = Vec::new();
-    let len = (4 + 8) as u16;
-    raw.extend_from_slice(&len.to_le_bytes());
-    raw.extend_from_slice(&14u16.to_le_bytes()); // WGDEVICE_A_H1
-    raw.extend_from_slice(b"1234567\0");
-
-    let header = GenlHeader {
-        cmd: AmneziaWireguardCmd::GetDevice.into(),
-        version: 2,
-    };
-    let parsed = AmneziaWireguardMessage::parse_with_param(&raw, header).unwrap();
-    assert_eq!(
-        parsed.attributes,
-        vec![AmneziaWireguardAttribute::H1("1234567".into())]
-    );
-}
-
-/// The original AmneziaWG (genl version 1) sent magic headers as bare u32.
-#[test]
-fn test_parse_legacy_magic_header_u32() {
-    let mut raw = Vec::new();
-    let len = (4 + 4) as u16;
-    raw.extend_from_slice(&len.to_le_bytes());
-    raw.extend_from_slice(&14u16.to_le_bytes()); // WGDEVICE_A_H1
-    raw.extend_from_slice(&123u32.to_le_bytes());
-
-    let header = GenlHeader {
-        cmd: AmneziaWireguardCmd::GetDevice.into(),
-        version: 1,
-    };
-    let parsed = AmneziaWireguardMessage::parse_with_param(&raw, header).unwrap();
-    assert_eq!(
-        parsed.attributes,
-        vec![AmneziaWireguardAttribute::H1("123".into())]
-    );
-}
-
-/// Range variants emit the AmneziaWG 3.0 u64 wire format; parsing them back
-/// yields the normalized string variants.
-#[test]
-fn test_magic_header_range_emit() {
-    use crate::range::u32_range_pack;
-
-    let msg = AmneziaWireguardMessage {
-        cmd: AmneziaWireguardCmd::SetDevice,
-        attributes: vec![
-            AmneziaWireguardAttribute::H1Range(u32_range_pack(61220074, 118999195)),
-            AmneziaWireguardAttribute::H4Range(u32_range_pack(4, 4)),
-        ],
-    };
-
     let mut buffer = vec![0; msg.buffer_len()];
     msg.emit(&mut buffer);
-
-    // H1 (type 14 / 0x0e): u64 LE 61220074 | 118999195 << 32
-    let mut h1_bytes = vec![0x0c, 0x00, 0x0e, 0x00];
-    h1_bytes.extend_from_slice(&u32_range_pack(61220074, 118999195).to_le_bytes());
-    assert!(
-        buffer
-            .windows(h1_bytes.len())
-            .any(|w| w == h1_bytes.as_slice())
-    );
-
-    let parsed = roundtrip_msg(msg);
-    assert_eq!(
-        parsed.attributes,
-        vec![
-            AmneziaWireguardAttribute::H1("61220074-118999195".into()),
-            AmneziaWireguardAttribute::H4("4".into()),
-        ]
-    );
+    assert_eq!(parse_msg(&buffer, 2), msg.attributes);
 }
 
+// Every attribute AmneziaWG adds, pinned to the bytes the kernel module expects. Values differ
+// per attribute so that two swapped kinds cannot pass. Range variants parse back as the string
+// variant with the same kind.
 #[test]
-fn test_v3_device_attributes_roundtrip() {
-    let msg = AmneziaWireguardMessage {
-        cmd: AmneziaWireguardCmd::SetDevice,
-        attributes: vec![
-            AmneziaWireguardAttribute::HeaderProtectionKey([7u8; 32]),
-            AmneziaWireguardAttribute::ContentPaddingAddition(100),
-            AmneziaWireguardAttribute::RekeyAfterTime(120),
-            AmneziaWireguardAttribute::RekeyTimeout(5),
-            AmneziaWireguardAttribute::RejectAfterTime(180),
-            AmneziaWireguardAttribute::KeepaliveTimeout(10),
-            AmneziaWireguardAttribute::MaxHandshakeAttempts(3),
-        ],
-    };
-
-    assert_eq!(msg, roundtrip_msg(msg.clone()));
-}
-
-#[test]
-fn test_keepalive_range_roundtrip() {
-    let msg = AmneziaWireguardMessage {
-        cmd: AmneziaWireguardCmd::SetDevice,
-        attributes: vec![AmneziaWireguardAttribute::Peers(vec![
-            AmneziaWireguardPeer(vec![
-                AmneziaWireguardPeerAttribute::PublicKey([3u8; 32]),
-                AmneziaWireguardPeerAttribute::PersistentKeepaliveRange(25 | (30 << 16)),
-            ]),
-        ])],
-    };
-
-    assert_eq!(msg, roundtrip_msg(msg.clone()));
-}
-
-// The kernel nests the peer attributes directly under WGDEVICE_A_PEER in
-// WG_CMD_UNKNOWN_PEER notifications, with no per-peer header as in
-// WGDEVICE_A_PEERS.
-#[test]
-fn test_device_peer_wire_format() {
+fn test_amnezia_attribute_wire_format() {
     use netlink_packet_core::NlaBuffer;
 
-    let attr = AmneziaWireguardAttribute::Peer(AmneziaWireguardPeer(vec![
-        AmneziaWireguardPeerAttribute::PublicKey([7u8; 32]),
-    ]));
-    let mut buf = vec![0; attr.buffer_len()];
-    attr.emit(&mut buf);
+    use AmneziaWireguardAttribute as A;
 
-    // WGDEVICE_A_PEER (18) | NLA_F_NESTED, len = 4 + 36, then
-    // WGPEER_A_PUBLIC_KEY (1), len = 4 + 32.
-    let mut expected = vec![0x28, 0x00, 0x12, 0x80, 0x24, 0x00, 0x01, 0x00];
-    expected.extend([7u8; 32]);
-    assert_eq!(buf, expected);
+    let peer_key = [hex!("2400 0100").as_slice(), &[0x07; 32]].concat();
+    let rows: Vec<(A, Vec<u8>, A)> = vec![
+        (A::JC(1), hex!("0600 0900 0100 0000").into(), A::JC(1)),
+        (A::Jmin(2), hex!("0600 0a00 0200 0000").into(), A::Jmin(2)),
+        (A::Jmax(3), hex!("0600 0b00 0300 0000").into(), A::Jmax(3)),
+        (A::S1(4), hex!("0600 0c00 0400 0000").into(), A::S1(4)),
+        (A::S2(5), hex!("0600 0d00 0500 0000").into(), A::S2(5)),
+        (A::S3(6), hex!("0600 1300 0600 0000").into(), A::S3(6)),
+        (A::S4(7), hex!("0600 1400 0700 0000").into(), A::S4(7)),
+        (
+            A::H1("1".into()),
+            hex!("0600 0e00 3100 0000").into(),
+            A::H1("1".into()),
+        ),
+        (
+            A::H2("2".into()),
+            hex!("0600 0f00 3200 0000").into(),
+            A::H2("2".into()),
+        ),
+        (
+            A::H3("3".into()),
+            hex!("0600 1000 3300 0000").into(),
+            A::H3("3".into()),
+        ),
+        (
+            A::H4("4".into()),
+            hex!("0600 1100 3400 0000").into(),
+            A::H4("4".into()),
+        ),
+        (
+            A::H1Range(0x0000_0002_0000_0001),
+            hex!("0c00 0e00 0100 0000 0200 0000").into(),
+            A::H1("1-2".into()),
+        ),
+        (
+            A::H2Range(0x0000_0004_0000_0003),
+            hex!("0c00 0f00 0300 0000 0400 0000").into(),
+            A::H2("3-4".into()),
+        ),
+        (
+            A::H3Range(0x0000_0006_0000_0005),
+            hex!("0c00 1000 0500 0000 0600 0000").into(),
+            A::H3("5-6".into()),
+        ),
+        (
+            A::H4Range(0x0000_0008_0000_0007),
+            hex!("0c00 1100 0700 0000 0800 0000").into(),
+            A::H4("7-8".into()),
+        ),
+        (
+            A::I1("a".into()),
+            hex!("0600 1500 6100 0000").into(),
+            A::I1("a".into()),
+        ),
+        (
+            A::I2("b".into()),
+            hex!("0600 1600 6200 0000").into(),
+            A::I2("b".into()),
+        ),
+        (
+            A::I3("c".into()),
+            hex!("0600 1700 6300 0000").into(),
+            A::I3("c".into()),
+        ),
+        (
+            A::I4("d".into()),
+            hex!("0600 1800 6400 0000").into(),
+            A::I4("d".into()),
+        ),
+        (
+            A::I5("e".into()),
+            hex!("0600 1900 6500 0000").into(),
+            A::I5("e".into()),
+        ),
+        (
+            A::HeaderProtectionKey([0x11; 32]),
+            [hex!("2400 1a00").as_slice(), &[0x11; 32]].concat(),
+            A::HeaderProtectionKey([0x11; 32]),
+        ),
+        (
+            A::ContentPaddingAddition(9),
+            hex!("0800 1b00 0900 0000").into(),
+            A::ContentPaddingAddition(9),
+        ),
+        (
+            A::RekeyAfterTime(10),
+            hex!("0800 1c00 0a00 0000").into(),
+            A::RekeyAfterTime(10),
+        ),
+        (
+            A::RekeyTimeout(11),
+            hex!("0800 1d00 0b00 0000").into(),
+            A::RekeyTimeout(11),
+        ),
+        (
+            A::RejectAfterTime(12),
+            hex!("0800 1e00 0c00 0000").into(),
+            A::RejectAfterTime(12),
+        ),
+        (
+            A::KeepaliveTimeout(13),
+            hex!("0800 1f00 0d00 0000").into(),
+            A::KeepaliveTimeout(13),
+        ),
+        (
+            A::MaxHandshakeAttempts(14),
+            hex!("0800 2000 0e00 0000").into(),
+            A::MaxHandshakeAttempts(14),
+        ),
+        (
+            A::RandomTrailers(true),
+            hex!("0500 2100 0100 0000").into(),
+            A::RandomTrailers(true),
+        ),
+        (
+            A::DisableCookies(true),
+            hex!("0500 2200 0100 0000").into(),
+            A::DisableCookies(true),
+        ),
+        // WG_CMD_UNKNOWN_PEER nests the peer attributes directly under WGDEVICE_A_PEER, with no
+        // per-peer header as in WGDEVICE_A_PEERS.
+        (
+            A::Peer(AmneziaWireguardPeer(vec![
+                AmneziaWireguardPeerAttribute::PublicKey([0x07; 32]),
+            ])),
+            [hex!("2800 1280").as_slice(), &peer_key].concat(),
+            A::Peer(AmneziaWireguardPeer(vec![
+                AmneziaWireguardPeerAttribute::PublicKey([0x07; 32]),
+            ])),
+        ),
+        // The AmneziaWG 3.0 keepalive is a u32 packing a u16 range, low half first.
+        (
+            A::Peers(vec![AmneziaWireguardPeer(vec![
+                AmneziaWireguardPeerAttribute::PersistentKeepaliveRange(0x001e_0019),
+            ])]),
+            hex!("1000 0880 0c00 0080 0800 0500 1900 1e00").into(),
+            A::Peers(vec![AmneziaWireguardPeer(vec![
+                AmneziaWireguardPeerAttribute::PersistentKeepaliveRange(0x001e_0019),
+            ])]),
+        ),
+    ];
 
-    let parsed = AmneziaWireguardAttribute::parse(&NlaBuffer::new(&buf)).unwrap();
-    assert_eq!(parsed, attr);
+    for (attr, wire, parsed) in rows {
+        let mut buf = vec![0; attr.buffer_len()];
+        attr.emit(&mut buf);
+        assert_eq!(buf, wire, "emitting {attr:?}");
+        assert_eq!(
+            A::parse(&NlaBuffer::new_checked(&wire).unwrap()).unwrap(),
+            parsed,
+            "parsing {attr:?}"
+        );
+    }
 }
 
 // Kinds neither crate knows, such as the zero-length WGPEER_A_ADVANCED_SECURITY flag (11) the
@@ -662,23 +405,19 @@ fn test_device_peer_wire_format() {
 fn test_unknown_attributes_roundtrip_as_other() {
     use netlink_packet_core::NlaBuffer;
 
-    // WGDEVICE_A_PEER | NLA_F_NESTED, len = 4 + 4 + 8, holding WGPEER_A_ADVANCED_SECURITY
-    // (11, no payload) and an unknown kind 99 with a 4-byte payload.
-    let peer = [
-        0x10, 0x00, 0x12, 0x80, 0x04, 0x00, 0x0b, 0x00, 0x08, 0x00, 0x63, 0x00, 0xde, 0xad, 0xbe,
-        0xef,
-    ];
-    // Unknown device kind 99 with a 4-byte payload.
-    let device = [0x08, 0x00, 0x63, 0x00, 0x01, 0x02, 0x03, 0x04];
+    let advanced_security = nla(11, &[]);
+    let unknown = nla(99, &hex!("dead beef"));
+    let peer = nla(18 | 0x8000, &[advanced_security, unknown.clone()].concat());
 
-    for wire in [&peer[..], &device[..]] {
-        let attr = AmneziaWireguardAttribute::parse(&NlaBuffer::new(&wire)).unwrap();
+    for wire in [&peer, &unknown] {
+        let attr =
+            AmneziaWireguardAttribute::parse(&NlaBuffer::new_checked(wire).unwrap()).unwrap();
         let mut buf = vec![0; attr.buffer_len()];
         attr.emit(&mut buf);
-        assert_eq!(buf, wire);
+        assert_eq!(&buf, wire);
     }
 
-    let parsed = AmneziaWireguardAttribute::parse(&NlaBuffer::new(&&peer[..])).unwrap();
+    let parsed = AmneziaWireguardAttribute::parse(&NlaBuffer::new_checked(&peer).unwrap()).unwrap();
     let AmneziaWireguardAttribute::Peer(peer) = parsed else {
         panic!("expected WGDEVICE_A_PEER, got {parsed:?}");
     };
@@ -690,48 +429,16 @@ fn test_unknown_attributes_roundtrip_as_other() {
 }
 
 // The genl header carries the family version, which fixes the magic header wire type: an 8-byte
-// u64 range from a version 3 module stays a range even when its bytes read as a digit string.
+// u64 range from a version 3 module stays a range even when its bytes read as a digit string,
+// and a version 1 u32 stays a number.
 #[test]
 fn test_magic_header_decoded_by_family_version() {
-    // WGDEVICE_A_H1 (14), len = 4 + 8, payload b"1234567\0" as a little-endian u64 range.
-    let wire = [
-        0x0c, 0x00, 0x0e, 0x00, b'1', b'2', b'3', b'4', b'5', b'6', b'7', 0x00,
-    ];
-    let parse = |version| {
-        AmneziaWireguardMessage::parse_with_param(
-            &wire,
-            GenlHeader {
-                cmd: AmneziaWireguardCmd::GetDevice.into(),
-                version,
-            },
-        )
-        .unwrap()
-        .attributes
-    };
+    use AmneziaWireguardAttribute::H1;
 
-    assert_eq!(
-        parse(3),
-        vec![AmneziaWireguardAttribute::H1("875770417-3618357".into())]
-    );
-    assert_eq!(
-        parse(2),
-        vec![AmneziaWireguardAttribute::H1("1234567".into())]
-    );
-
-    // A version 1 module sends a bare u32; 0x00333231 reads as b"123\0".
-    let legacy = [0x08, 0x00, 0x0e, 0x00, b'1', b'2', b'3', 0x00];
-    let parsed = AmneziaWireguardMessage::parse_with_param(
-        &legacy,
-        GenlHeader {
-            cmd: AmneziaWireguardCmd::GetDevice.into(),
-            version: 1,
-        },
-    )
-    .unwrap();
-    assert_eq!(
-        parsed.attributes,
-        vec![AmneziaWireguardAttribute::H1("3355185".into())]
-    );
+    let digits = nla(14, b"1234567\0");
+    assert_eq!(parse_msg(&digits, 3), vec![H1("875770417-3618357".into())]);
+    assert_eq!(parse_msg(&digits, 2), vec![H1("1234567".into())]);
+    assert_eq!(parse_msg(&nla(14, b"123\0"), 1), vec![H1("3355185".into())]);
 }
 
 // An attribute parsed on its own has no genl header, so the magic header wire type is guessed
@@ -740,23 +447,20 @@ fn test_magic_header_decoded_by_family_version() {
 fn test_magic_header_type_guessed_without_family_version() {
     use netlink_packet_core::NlaBuffer;
 
-    use crate::range::u32_range_pack;
-
     let parse = |payload: &[u8]| {
-        let mut wire = vec![(4 + payload.len()) as u8, 0x00, 0x0e, 0x00];
-        wire.extend_from_slice(payload);
-        AmneziaWireguardAttribute::parse(&NlaBuffer::new(&wire))
+        let wire = nla(14, payload);
+        AmneziaWireguardAttribute::parse(&NlaBuffer::new_checked(&wire).unwrap())
     };
 
     assert_eq!(
-        parse(&123u32.to_le_bytes()).unwrap(),
+        parse(&hex!("7b00 0000")).unwrap(),
         AmneziaWireguardAttribute::H1("123".into())
     );
     assert_eq!(
-        parse(&u32_range_pack(5, 9).to_le_bytes()).unwrap(),
+        parse(&hex!("0500 0000 0900 0000")).unwrap(),
         AmneziaWireguardAttribute::H1("5-9".into())
     );
-    assert!(parse(&[1, 2]).is_err());
+    assert!(parse(&hex!("0102")).is_err());
 }
 
 #[test]
