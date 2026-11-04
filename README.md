@@ -48,3 +48,11 @@ sudo -E env "PATH=$PATH" cargo test --test integration
 ## License
 
 [MIT](LICENSE-MIT).
+
+## Acknowledgements
+
+The AmneziaWG attribute handling, the tests and the examples come from
+[frkn-dev/netlink-packet-amnezia-wireguard](https://github.com/frkn-dev/netlink-packet-amnezia-wireguard),
+itself a fork of
+[rust-netlink/netlink-packet-wireguard](https://github.com/rust-netlink/netlink-packet-wireguard),
+on which this crate now builds.
