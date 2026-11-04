@@ -10,7 +10,7 @@ use futures::StreamExt;
 #[cfg(target_os = "linux")]
 use genetlink::new_connection;
 #[cfg(target_os = "linux")]
-use netlink_packet_amnezia_wireguard::{
+use netlink_packet_amneziawg::{
     AmneziaWireguardAllowedIp, AmneziaWireguardAllowedIpAttr, AmneziaWireguardAttribute,
     AmneziaWireguardCmd, AmneziaWireguardMessage, AmneziaWireguardPeerAttribute,
 };

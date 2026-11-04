@@ -13,7 +13,7 @@ use std::process::Command;
 
 use futures::{StreamExt, lock::Mutex};
 use genetlink::new_connection;
-use netlink_packet_amnezia_wireguard::{
+use netlink_packet_amneziawg::{
     AmneziaWireguardAttribute, AmneziaWireguardCmd, AmneziaWireguardMessage,
     range::u32_range_from_string,
 };

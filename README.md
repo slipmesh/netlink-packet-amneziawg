@@ -1,4 +1,4 @@
-# netlink-packet-amnezia-wireguard
+# netlink-packet-amneziawg
 
 Parses and emits [AmneziaWG](https://docs.amnezia.org/documentation/amnezia-wg/)
 generic netlink packets on Linux, the same way the `awg` tool configures
@@ -24,7 +24,7 @@ The crate is not published on crates.io. Add it as a git dependency:
 
 ```toml
 [dependencies]
-netlink-packet-amnezia-wireguard = { git = "https://github.com/slipmesh/netlink-packet-amnezia-wireguard" }
+netlink-packet-amneziawg = { git = "https://github.com/slipmesh/netlink-packet-amneziawg" }
 ```
 
 ## Usage

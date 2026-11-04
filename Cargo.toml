@@ -1,9 +1,9 @@
 [package]
-name = "netlink-packet-amnezia-wireguard"
+name = "netlink-packet-amneziawg"
 version = "0.1.0"
 edition = "2024"
-homepage = "https://github.com/slipmesh/netlink-packet-amnezia-wireguard"
-repository = "https://github.com/slipmesh/netlink-packet-amnezia-wireguard"
+homepage = "https://github.com/slipmesh/netlink-packet-amneziawg"
+repository = "https://github.com/slipmesh/netlink-packet-amneziawg"
 keywords = ["wireguard", "netlink", "linux", "amnezia"]
 license = "MIT"
 readme = "README.md"
