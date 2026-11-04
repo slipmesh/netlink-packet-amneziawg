@@ -11,6 +11,7 @@ use netlink_packet_wireguard::WireguardPeerAttribute;
 use crate::{AmneziaWireguardAllowedIp, AmneziaWireguardPeerFlags, AmneziaWireguardTimeSpec};
 
 const WGPEER_A_PERSISTENT_KEEPALIVE_INTERVAL: u16 = 5;
+const WGPEER_A_ALLOWEDIPS: u16 = 9;
 
 pub(crate) struct AmneziaWireguardPeers(pub(crate) Vec<AmneziaWireguardPeer>);
 
@@ -97,10 +98,13 @@ impl AmneziaWireguardPeerAttribute {
             Self::LastHandshake(v) => WireguardPeerAttribute::LastHandshake(*v),
             Self::RxBytes(v) => WireguardPeerAttribute::RxBytes(*v),
             Self::TxBytes(v) => WireguardPeerAttribute::TxBytes(*v),
-            Self::AllowedIps(v) => WireguardPeerAttribute::AllowedIps(v.clone()),
             Self::ProtocolVersion(v) => WireguardPeerAttribute::ProtocolVersion(*v),
             Self::Flags(v) => WireguardPeerAttribute::Flags(*v),
-            Self::PersistentKeepaliveRange(_) | Self::Other(_) => return None,
+            // Allowed IPs are emitted through their upstream `Nla` impl directly, which spares
+            // cloning the whole list for every length and kind lookup.
+            Self::AllowedIps(_) | Self::PersistentKeepaliveRange(_) | Self::Other(_) => {
+                return None;
+            }
         })
     }
 
@@ -116,9 +120,15 @@ impl AmneziaWireguardPeerAttribute {
             WireguardPeerAttribute::AllowedIps(v) => Self::AllowedIps(v),
             WireguardPeerAttribute::ProtocolVersion(v) => Self::ProtocolVersion(v),
             WireguardPeerAttribute::Flags(v) => Self::Flags(v),
-            WireguardPeerAttribute::Other(v) => Self::Other(v),
             _ => return None,
         })
+    }
+}
+
+impl AmneziaWireguardPeerAttribute {
+    fn upstream(&self) -> WireguardPeerAttribute {
+        self.to_wireguard()
+            .expect("every peer attribute not encoded here is mapped by to_wireguard")
     }
 }
 
@@ -126,28 +136,27 @@ impl Nla for AmneziaWireguardPeerAttribute {
     fn value_len(&self) -> usize {
         match self {
             Self::PersistentKeepaliveRange(v) => size_of_val(v),
+            Self::AllowedIps(v) => v.as_slice().buffer_len(),
             Self::Other(v) => v.value_len(),
-            _ => self.to_wireguard().map_or(0, |v| v.value_len()),
+            _ => self.upstream().value_len(),
         }
     }
 
     fn kind(&self) -> u16 {
         match self {
             Self::PersistentKeepaliveRange(_) => WGPEER_A_PERSISTENT_KEEPALIVE_INTERVAL,
+            Self::AllowedIps(_) => WGPEER_A_ALLOWEDIPS | NLA_F_NESTED,
             Self::Other(v) => v.kind(),
-            _ => self.to_wireguard().map_or(0, |v| v.kind()),
+            _ => self.upstream().kind(),
         }
     }
 
     fn emit_value(&self, buffer: &mut [u8]) {
         match self {
             Self::PersistentKeepaliveRange(v) => emit_u32(buffer, *v).unwrap(),
+            Self::AllowedIps(v) => v.as_slice().emit(buffer),
             Self::Other(v) => v.emit_value(buffer),
-            _ => {
-                if let Some(v) = self.to_wireguard() {
-                    v.emit_value(buffer)
-                }
-            }
+            _ => self.upstream().emit_value(buffer),
         }
     }
 }
