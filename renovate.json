@@ -1,4 +1,12 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "extends": ["github>slipmesh/.github"]
+  "extends": ["github>slipmesh/.github"],
+  "packageRules": [
+    {
+      "description": "A library's requirement is the minimum its consumers must take: a patch release moves the lock file only, never that minimum.",
+      "matchManagers": ["cargo"],
+      "matchDepTypes": ["dependencies"],
+      "rangeStrategy": "update-lockfile"
+    }
+  ]
 }
