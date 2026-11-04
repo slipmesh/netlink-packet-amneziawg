@@ -18,7 +18,7 @@ netlink-packet-wireguard = "0.5.1"
 [dev-dependencies]
 base64 = "0.22.1"
 env_logger = "0.11.10"
-futures = "0.3.16"
+futures = "0.3.34"
 getrandom = "0.4.2"
 hex-literal = "1.1"
 pretty_assertions = "1.4.1"
