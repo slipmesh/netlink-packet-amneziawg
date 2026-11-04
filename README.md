@@ -49,8 +49,8 @@ sudo -E env "PATH=$PATH" cargo test --test integration
 ## Release
 
 Run the Release PR workflow (Actions, then Release PR). It opens `chore: release vX.Y.Z`, which
-sets `version` in `Cargo.toml` to the next version the commits since the last tag call for, or to
-the version given, and regenerates `CHANGELOG.md` with git-cliff. Merging that PR releases it: once
+sets `version` in `Cargo.toml` to the version given, or else to the one the commits since the last
+tag call for, and regenerates `CHANGELOG.md` with git-cliff. Merging that PR releases it: once
 the checks of that push pass, the commit is tagged `vX.Y.Z` and gets a GitHub Release with its
 `CHANGELOG.md` section as the notes. Nothing is built; the tag is what a consumer depends on.
 
