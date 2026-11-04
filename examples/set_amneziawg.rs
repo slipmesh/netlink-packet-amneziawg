@@ -40,7 +40,7 @@ async fn main() {
         return;
     }
 
-    // The amneziawg interface need to exist before executing this code.
+    // The amneziawg interface needs to exist before executing this code.
     // This can be done with `ip link <name> type amneziawg` command.
     let name = argv[1].clone();
     let priv_key = generate_priv_key();
