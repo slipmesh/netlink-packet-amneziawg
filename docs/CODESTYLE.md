@@ -25,8 +25,9 @@
 
 ## Error handling
 
-- Parsing never panics on its input. A malformed payload returns a `DecodeError` with a
-  `.context()` naming the kernel attribute: `"invalid WGDEVICE_A_JC value"`.
+- Parsing code does not `unwrap` or index into a payload without checking its length; it reads
+  through the `parse_*` helpers and returns their `DecodeError` with a `.context()` naming the
+  kernel attribute: `"invalid WGDEVICE_A_JC value"`.
 - Emitting may `unwrap` the `emit_*` helpers: the buffer is sized by the same `value_len`, so a
   failure there is a bug in this crate, not bad input.
 - No silent fallback values. A case the code has already ruled out panics with the reason
