@@ -2,6 +2,7 @@
 name = "netlink-packet-amneziawg"
 version = "0.1.0"
 edition = "2024"
+rust-version = "1.85"
 homepage = "https://github.com/slipmesh/netlink-packet-amneziawg"
 repository = "https://github.com/slipmesh/netlink-packet-amneziawg"
 keywords = ["wireguard", "netlink", "linux", "amnezia"]
