@@ -52,14 +52,14 @@ mod tests {
     use super::*;
 
     #[test]
-    fn pack_unpack_roundtrip() {
+    fn test_pack_unpack_roundtrip() {
         let v = u32_range_pack(61220074, 118999195);
         assert_eq!(u32_range_unpack(v), (61220074, 118999195));
         assert_eq!(u32_range_unpack(u32_range_pack(5, 5)), (5, 5));
     }
 
     #[test]
-    fn to_string_formats() {
+    fn test_to_string_formats() {
         assert_eq!(u32_range_to_string(u32_range_pack(25, 25)), "25");
         assert_eq!(
             u32_range_to_string(u32_range_pack(61220074, 118999195)),
@@ -68,7 +68,7 @@ mod tests {
     }
 
     #[test]
-    fn from_string_parses() {
+    fn test_from_string_parses() {
         assert_eq!(u32_range_from_string("25"), Some(u32_range_pack(25, 25)));
         assert_eq!(
             u32_range_from_string("61220074-118999195"),
