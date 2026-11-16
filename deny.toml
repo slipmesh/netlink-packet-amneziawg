@@ -1,0 +1,28 @@
+# This crate is MIT: every license below can ship with it.
+
+[graph]
+# Every feature, so a dependency only a feature pulls in is still checked.
+all-features = true
+
+[licenses]
+allow = [
+  "MIT",
+  "Apache-2.0",
+  "BSD-2-Clause",
+  "Unicode-3.0",
+]
+confidence-threshold = 0.93
+
+[licenses.private]
+# A workspace member that is never published ships under nothing of its own.
+ignore = true
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+# A path dependency inside the workspace carries no version and is not a wildcard.
+allow-wildcard-paths = true
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
