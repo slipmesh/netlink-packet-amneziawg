@@ -48,9 +48,10 @@ cargo test
 ```
 
 The integration tests in `tests/integration.rs` create `amneziawg` interfaces.
-They need the AmneziaWG 3.0 kernel module or later and root, and skip
-themselves otherwise. `AWG_INTEGRATION=1` makes a test that cannot run here
-fail instead of skip:
+They need the AmneziaWG kernel module and root, and skip themselves otherwise;
+the ones that set ranges need AmneziaWG 3.0 or later and skip on an older
+module. `AWG_INTEGRATION=1` makes a test that cannot run here fail instead of
+skip:
 
 ```bash
 sudo -E env "PATH=$PATH" AWG_INTEGRATION=1 cargo test --test integration

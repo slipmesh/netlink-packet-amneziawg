@@ -4,10 +4,10 @@
 //! loaded and root privileges (CAP_NET_ADMIN).
 //!
 //! These tests are compiled only on Linux. They skip themselves when the
-//! AmneziaWG family is not available, is older than AmneziaWG 3.0, or the
-//! process lacks the privileges to create network interfaces, unless
-//! `AWG_INTEGRATION=1` says the run is meant to reach the module: then a test
-//! that cannot run here fails.
+//! AmneziaWG family is not available or the process lacks the privileges to
+//! create network interfaces; the ones that set ranges also skip on a module
+//! older than AmneziaWG 3.0. `AWG_INTEGRATION=1` says the run is meant to
+//! reach the module: then a test that cannot run here fails.
 
 #![cfg(target_os = "linux")]
 
