@@ -148,16 +148,30 @@ pub enum AmneziaWireguardAttribute {
     I5(String),
     // AmneziaWG 3.0 attributes
     HeaderProtectionKey([u8; HEADER_PROTECTION_KEY_LEN]),
-    /// This and the five variants below hold a `u16` range packed into a
-    /// `u32` (`lo | hi << 16`), not a plain number: build the value with
-    /// [`crate::range::u16_range_pack`] and read it with
-    /// [`crate::range::u16_range_unpack`]. Zero selects the kernel module's
-    /// own constant.
+    /// Bytes of padding added to a data packet, as a `u16` range packed
+    /// into a `u32` (`lo | hi << 16`), not a plain number: build the value
+    /// with [`crate::range::u16_range_pack`] and read it with
+    /// [`crate::range::u16_range_unpack`]. Zero adds no padding.
     ContentPaddingAddition(u32),
+    /// Seconds after which a session key is renewed, as a packed `u16`
+    /// range like [`Self::ContentPaddingAddition`]. Zero selects the kernel
+    /// module's own constant.
     RekeyAfterTime(u32),
+    /// Seconds after which an unanswered handshake is sent again, as a
+    /// packed `u16` range like [`Self::ContentPaddingAddition`]. Zero
+    /// selects the kernel module's own constant.
     RekeyTimeout(u32),
+    /// Seconds after which a session key is no longer used, as a packed
+    /// `u16` range like [`Self::ContentPaddingAddition`]. Zero selects the
+    /// kernel module's own constant.
     RejectAfterTime(u32),
+    /// Seconds of receiving without sending after which a keepalive goes
+    /// out, as a packed `u16` range like [`Self::ContentPaddingAddition`].
+    /// Zero selects the kernel module's own constant.
     KeepaliveTimeout(u32),
+    /// Handshake retries before giving up, as a packed `u16` range like
+    /// [`Self::ContentPaddingAddition`]. Zero selects the kernel module's
+    /// own constant.
     MaxHandshakeAttempts(u32),
     // AmneziaWG 3.1 attributes (genl family version is still 3; only the
     // 3.1+ kernel module accepts them).

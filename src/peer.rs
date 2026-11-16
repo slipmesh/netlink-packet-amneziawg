@@ -74,9 +74,10 @@ pub enum AmneziaWireguardPeerAttribute {
     /// Persistent keepalive as `u32` packing a `u16` range
     /// (`lo | hi << 16`), the wire format of the AmneziaWG 3.0 kernel
     /// module (genl family version 3). Produced by parsing 4-byte
-    /// payloads; a plain interval `v` sent by new tools arrives as
-    /// `v | v << 16`. Build the value with
-    /// [`crate::range::u16_range_pack`]: a bare `v` is the range `v..0`.
+    /// payloads. An interval of `n` seconds is the range `n..n`, built with
+    /// [`crate::range::u16_range_pack`]; that is also how the module reports
+    /// an interval the 3.0 tools set. The number `n` alone is the range
+    /// `n..0`. Zero disables the keepalive.
     PersistentKeepaliveRange(u32),
     LastHandshake(AmneziaWireguardTimeSpec),
     RxBytes(u64),

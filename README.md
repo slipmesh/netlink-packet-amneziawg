@@ -16,8 +16,9 @@ crate; this one adds:
   instead of WireGuard's `u16`;
 - `range`, which packs and unpacks the two range wire formats: `u32` ends in a
   `u64` for the magic headers, `u16` ends in a `u32` for the keepalive and the
-  device timing and padding attributes. A single value `v` goes out as the
-  range `v..v`, never as a bare `v`.
+  device timing and padding attributes. The variants take the packed value
+  as given, so a caller with a single value `v` packs it as the range `v..v`:
+  a bare `v` is the range `v..0`.
 
 Allowed IPs, flags, timestamps and commands are the upstream types, re-exported
 under `AmneziaWireguard*` names.

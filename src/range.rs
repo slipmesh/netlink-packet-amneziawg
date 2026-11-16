@@ -15,10 +15,20 @@
 //! `WGDEVICE_A_REKEY_TIMEOUT`, `WGDEVICE_A_REJECT_AFTER_TIME`,
 //! `WGDEVICE_A_KEEPALIVE_TIMEOUT`, `WGDEVICE_A_MAX_HANDSHAKE_ATTEMPTS`) and
 //! the peer's `WGPEER_A_PERSISTENT_KEEPALIVE_INTERVAL` as a `u32` packing a
-//! range of `u16` values the same way, and draws a value between the two ends
-//! at every use. A single value `v` is the range `v..v`: a bare `v` on the
-//! wire is the range `v..0`, from which the module draws an arbitrary value.
-//! An all-zero range selects the module's own constant.
+//! range of `u16` values the same way. Most uses draw a value between the two
+//! ends. Some read one end as it is, such as the low end of the rekey timeout
+//! where a minimum is needed and the high end of the keepalive timeout for
+//! the timer of a new handshake. The handshake attempt limit is drawn once
+//! per handshake.
+//!
+//! The module does not check that `lo <= hi`. A single value `v` has to be
+//! sent as the range `v..v`: a bare `v` on the wire is the range `v..0`,
+//! which acts as `v` where the low end is read, as 0 where the high end is
+//! read, and as a value unrelated to `v` where one is drawn.
+//!
+//! An all-zero range selects the module's own constant for the five timing
+//! attributes, adds no padding for the content padding addition, and
+//! disables the persistent keepalive.
 
 /// Packs a `[lo, hi]` `u32` range into the `u64` wire value used by the
 /// AmneziaWG 3.0 kernel module.
@@ -32,7 +42,8 @@ pub fn u32_range_unpack(range: u64) -> (u32, u32) {
 }
 
 /// Packs a `[lo, hi]` `u16` range into the `u32` wire value used by the
-/// AmneziaWG 3.0 kernel module.
+/// AmneziaWG 3.0 kernel module. That `lo <= hi` is the caller's to ensure:
+/// neither this function nor the module checks it.
 pub fn u16_range_pack(lo: u16, hi: u16) -> u32 {
     ((hi as u32) << 16) | (lo as u32)
 }
