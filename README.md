@@ -19,8 +19,9 @@ crate; this one adds:
 
 Ranges are emitted in the form of the AmneziaWG 3.0 module (genl family
 version 3). The forms older modules send, a magic header as a number or a
-string and the keepalive as one interval, are read into the same ranges, so a
-device of an older module can be read and not configured.
+string and the keepalive as one interval, are read into the same ranges. A
+device of an older module can still be read and given its other attributes,
+but not a magic header or a keepalive.
 
 Allowed IPs, flags, timestamps and commands are the upstream types, re-exported
 under `AmneziaWireguard*` names.

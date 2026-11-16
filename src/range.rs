@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: MIT
 
-/// A range the AmneziaWG 3.0 kernel module draws a value from, both ends
-/// included. One value `v` is the range from `v` to `v`, which [`From`]
-/// builds.
+/// A range of values the AmneziaWG 3.0 kernel module holds for an attribute,
+/// both ends included. Most uses draw a value out of it, not every use: some
+/// read one end, such as the low end of the rekey timeout. One value `v` is
+/// the range from `v` to `v`, which [`From`] builds.
 ///
 /// On the wire the two ends share one integer, the low end in the low half:
 /// `u32` ends in a `u64` for the magic headers, `u16` ends in a `u32` for the
@@ -13,11 +14,12 @@
 /// header range with `lo > hi` contains no value, and no packet of its type
 /// matches it.
 ///
-/// The zero range, which [`Default`] gives, is the module's "not set": its
-/// own constant for a timing attribute and for the attempt count, the padding
-/// a data packet gets without `ContentPaddingAddition`, no persistent
-/// keepalive. Only the range from 0 to 0 is that: out of one from 0 to `n`
-/// the module can draw 0.
+/// For a `u16` attribute the zero range, which [`Default`] gives, is the
+/// module's "not set": its own constant for a timing attribute and for the
+/// attempt count, the padding a data packet gets without
+/// `ContentPaddingAddition`, no persistent keepalive. Only the range from 0
+/// to 0 is that: out of one from 0 to `n` the module can draw 0. For a magic
+/// header it is the value 0.
 #[derive(Default, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct AmneziaWireguardRange<T> {
     pub lo: T,

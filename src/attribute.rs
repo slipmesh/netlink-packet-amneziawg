@@ -56,19 +56,34 @@ fn parse_magic_header(
         Some(1) => Ok(parse_u32(payload)
             .context("invalid u32 magic header value")?
             .into()),
-        Some(2) => {
-            let spec = parse_string(payload).context("invalid magic header string")?;
-            magic_header_spec(&spec)
-                .ok_or_else(|| DecodeError::from(format!("invalid magic header string {spec:?}")))
-        }
+        Some(2) => magic_header_spec(payload).ok_or_else(|| {
+            DecodeError::from(format!(
+                "invalid magic header string {:?}",
+                String::from_utf8_lossy(payload)
+            ))
+        }),
         _ => Ok(AmneziaWireguardRange::<u32>::from_wire(
             parse_u64(payload).context("invalid u64 magic header value")?,
         )),
     }
 }
 
-fn magic_header_spec(spec: &str) -> Option<AmneziaWireguardRange<u32>> {
-    let end = |digits: &str| digits.parse().ok();
+/// Decimal digits holding `v` or `lo-hi`, then one NUL and nothing after it.
+fn magic_header_spec(payload: &[u8]) -> Option<AmneziaWireguardRange<u32>> {
+    let (0, spec) = payload.split_last()? else {
+        return None;
+    };
+    if !spec.iter().all(|b| b.is_ascii_digit() || *b == b'-') {
+        return None;
+    }
+    let spec = std::str::from_utf8(spec).ok()?;
+    let end = |digits: &str| {
+        if digits.is_empty() {
+            None
+        } else {
+            digits.parse().ok()
+        }
+    };
     match spec.split_once('-') {
         Some((lo, hi)) => Some(AmneziaWireguardRange {
             lo: end(lo)?,
@@ -125,20 +140,25 @@ pub enum AmneziaWireguardAttribute {
     /// Bytes of padding a data packet gets in place of its usual padding,
     /// as far as the packet has room for them.
     ContentPaddingAddition(AmneziaWireguardRange<u16>),
-    /// Seconds after which a session key is renewed.
+    /// Seconds after which the initiator of a session renews its key on
+    /// sending. Also how long, three times it, a peer's keys are kept once
+    /// its handshake was given up; with the zero range that wait is three
+    /// times the module's constant of 180 seconds.
     RekeyAfterTime(AmneziaWireguardRange<u16>),
     /// Seconds after which an unanswered handshake is sent again.
     RekeyTimeout(AmneziaWireguardRange<u16>),
     /// Seconds that set two things: a peer's keys are wiped three times as
     /// long after a handshake, and the initiator renews a key on receiving
-    /// once it is older than this less the keepalive and rekey timeouts. A
+    /// once it is older than this less the low ends of the keepalive and
+    /// rekey timeouts. A
     /// key stops being used after the module's constant of 180 seconds
     /// whatever is set here.
     RejectAfterTime(AmneziaWireguardRange<u16>),
     /// Seconds of receiving without sending after which a keepalive goes
     /// out.
     KeepaliveTimeout(AmneziaWireguardRange<u16>),
-    /// Handshake retries before giving up.
+    /// Retries of a handshake: the module gives up once the count of retries
+    /// is above this value, so after this value plus one.
     MaxHandshakeAttempts(AmneziaWireguardRange<u16>),
     // AmneziaWG 3.1 attributes (genl family version is still 3; only the
     // 3.1+ kernel module accepts them).

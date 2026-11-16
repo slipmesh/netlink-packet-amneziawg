@@ -216,13 +216,18 @@ fn nla(kind: u16, payload: &[u8]) -> Vec<u8> {
 }
 
 fn parse_msg(attributes: &[u8], version: u8) -> Vec<AmneziaWireguardAttribute> {
+    parse_msg_checked(attributes, version).unwrap()
+}
+
+fn parse_msg_checked(
+    attributes: &[u8],
+    version: u8,
+) -> Result<Vec<AmneziaWireguardAttribute>, netlink_packet_core::DecodeError> {
     let header = GenlHeader {
         cmd: AmneziaWireguardCmd::GetDevice.into(),
         version,
     };
-    AmneziaWireguardMessage::parse_with_param(attributes, header)
-        .unwrap()
-        .attributes
+    AmneziaWireguardMessage::parse_with_param(attributes, header).map(|msg| msg.attributes)
 }
 
 #[test]
@@ -434,6 +439,11 @@ fn test_magic_header_string_is_read_as_it_is_or_refused() {
         b"-5\0",
         b"1-2-3\0",
         b"4294967296\0",
+        b"12\0junk",
+        b"12\0\0",
+        b"12",
+        b"+12\0",
+        b" 12\0",
     ] {
         assert!(parse(spec).is_err(), "{spec:?}");
     }
@@ -527,11 +537,64 @@ fn test_every_range_attribute_is_read_back_as_emitted() {
 fn test_range_attribute_of_a_wrong_length_is_refused() {
     use netlink_packet_core::NlaBuffer;
 
+    let parse = |kind, payload: &[u8]| {
+        let wire = nla(kind, payload);
+        AmneziaWireguardAttribute::parse(&NlaBuffer::new_checked(&wire).unwrap())
+    };
     for kind in 27..=32 {
-        let wire = nla(kind, &hex!("0900"));
-        let parsed = AmneziaWireguardAttribute::parse(&NlaBuffer::new_checked(&wire).unwrap());
-        assert!(parsed.is_err(), "kind {kind}: {parsed:?}");
+        for payload in [&hex!("0900")[..], &hex!("0900 0000 0000 0000")] {
+            let parsed = parse(kind, payload);
+            assert!(parsed.is_err(), "kind {kind}, {payload:?}: {parsed:?}");
+        }
     }
+    let keepalive = nla(8 | 0x8000, &nla(0x8000, &nla(5, &hex!("1900 00"))));
+    assert!(parse_msg_checked(&keepalive, 3).is_err());
+}
+
+// A magic header of the wrong length for the version that sent it is refused rather than read
+// as another form.
+#[test]
+fn test_magic_header_of_a_wrong_length_for_its_version_is_refused() {
+    for (payload, version) in [
+        (&hex!("0500 0000 0900 0000")[..], 1),
+        (&hex!("0500 0000")[..], 3),
+        (&hex!("0500 0000 0900 0000 0000 0000")[..], 3),
+    ] {
+        let parsed = parse_msg_checked(&nla(14, payload), version);
+        assert!(
+            parsed.is_err(),
+            "version {version}, {payload:?}: {parsed:?}"
+        );
+    }
+}
+
+// What this crate emits is what it reads back under the version its own header carries.
+#[test]
+fn test_message_is_read_back_under_its_own_version() {
+    use netlink_packet_generic::GenlFamily;
+
+    use AmneziaWireguardAttribute as A;
+    use AmneziaWireguardRange as R;
+
+    let msg = AmneziaWireguardMessage {
+        cmd: AmneziaWireguardCmd::SetDevice,
+        attributes: vec![
+            A::IfName("awg0".into()),
+            A::H1(R {
+                lo: 875770417,
+                hi: 3618357,
+            }),
+            A::H2(R { lo: 5, hi: 9 }),
+            A::H3(7.into()),
+            A::H4(R::default()),
+            A::Peers(vec![AmneziaWireguardPeer(vec![
+                AmneziaWireguardPeerAttribute::PersistentKeepalive(R { lo: 25, hi: 30 }),
+            ])]),
+        ],
+    };
+    let mut buffer = vec![0; msg.buffer_len()];
+    msg.emit(&mut buffer);
+    assert_eq!(parse_msg(&buffer, msg.version()), msg.attributes);
 }
 
 #[test]
@@ -544,7 +607,7 @@ fn test_genl_family() {
     };
 
     assert_eq!(AmneziaWireguardMessage::family_name(), "amneziawg");
-    assert_eq!(message(AmneziaWireguardCmd::GetDevice).version(), 2);
+    assert_eq!(message(AmneziaWireguardCmd::GetDevice).version(), 3);
     assert_eq!(message(AmneziaWireguardCmd::GetDevice).command(), 0);
     assert_eq!(message(AmneziaWireguardCmd::SetDevice).command(), 1);
 }
