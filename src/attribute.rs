@@ -144,9 +144,8 @@ pub enum AmneziaWireguardAttribute {
     /// Seconds that set two things: a peer's keys are wiped three times as
     /// long after a handshake, and the initiator renews a key on receiving
     /// once it is older than this less the low ends of the keepalive and
-    /// rekey timeouts. A
-    /// key stops being used after the module's constant of 180 seconds
-    /// whatever is set here.
+    /// rekey timeouts. A key stops being used after the module's constant of
+    /// 180 seconds whatever is set here.
     RejectAfterTime(AmneziaWireguardRange<u16>),
     /// Seconds of receiving without sending after which a keepalive goes
     /// out. Its high end also times a new handshake when sent data goes
