@@ -7,7 +7,8 @@ use netlink_packet_core::{
 use netlink_packet_wireguard::WireguardAttribute;
 
 use crate::{
-    AmneziaWireguardDeviceFlags, AmneziaWireguardPeer, peer::AmneziaWireguardPeers, range::Range,
+    AmneziaWireguardDeviceFlags, AmneziaWireguardPeer, AmneziaWireguardRange,
+    peer::AmneziaWireguardPeers,
 };
 
 const WG_KEY_LEN: usize = 32;
@@ -43,53 +44,37 @@ const WGDEVICE_A_MAX_HANDSHAKE_ATTEMPTS: u16 = 32;
 const WGDEVICE_A_RANDOM_TRAILERS: u16 = 33;
 const WGDEVICE_A_DISABLE_COOKIES: u16 = 34;
 
-/// Parses a magic header attribute (`WGDEVICE_A_H1`..`WGDEVICE_A_H4`).
-///
-/// The wire format depends on the kernel module version:
-/// - AmneziaWG 3.0 (genl version 3): `u64` packing a `u32` range (`lo | hi <<
-///   32`);
-/// - AmneziaWG v1.0.20260725 (genl version 2): NUL-terminated decimal string,
-///   `"<v>"` or `"<lo>-<hi>"`;
-/// - original AmneziaWG (genl version 1): bare `u32`.
-///
-/// All representations are normalized to the string form used by the v1.0
-/// module and by `awg`(8) config files. A known `family_version` fixes the
-/// wire type; without it the type is guessed from the payload.
-fn parse_magic_header(payload: &[u8], family_version: Option<u8>) -> Result<String, DecodeError> {
-    let range = || {
-        parse_u64(payload)
-            .context("invalid u64 magic header value")
-            .map(|wire| Range::<u32>::from_wire(wire).to_string())
-    };
+/// A magic header has been a `u32` (genl family version 1), a string holding
+/// `v` or `lo-hi` (version 2) and a `u64` range (version 3). The family
+/// version says which. Without one the payload is read in the form this
+/// crate emits: guessing from its bytes takes a range for a string of digits.
+fn parse_magic_header(
+    payload: &[u8],
+    family_version: Option<u8>,
+) -> Result<AmneziaWireguardRange<u32>, DecodeError> {
     match family_version {
-        Some(1) => {
-            return Ok(parse_u32(payload)
-                .context("invalid u32 magic header value")?
-                .to_string());
-        }
-        Some(3..) => return range(),
-        _ => {}
-    }
-    // A v1.0 string of exactly 7 digits plus NUL is also 8 bytes long, so
-    // the string check must come first. Magic header specs only contain
-    // decimal digits and at most one '-', which a binary range practically
-    // never satisfies.
-    let is_string = payload.last() == Some(&0)
-        && payload[..payload.len() - 1]
-            .iter()
-            .all(|b| b.is_ascii_digit() || *b == b'-');
-    if is_string {
-        return parse_string(payload).context("invalid magic header string");
-    }
-    match payload.len() {
-        8 => range(),
-        4 => Ok(parse_u32(payload)
+        Some(1) => Ok(parse_u32(payload)
             .context("invalid u32 magic header value")?
-            .to_string()),
-        _ => Err(DecodeError::from(format!(
-            "invalid magic header payload length {}",
-            payload.len()
-        ))),
+            .into()),
+        Some(2) => {
+            let spec = parse_string(payload).context("invalid magic header string")?;
+            magic_header_spec(&spec)
+                .ok_or_else(|| DecodeError::from(format!("invalid magic header string {spec:?}")))
+        }
+        _ => Ok(AmneziaWireguardRange::<u32>::from_wire(
+            parse_u64(payload).context("invalid u64 magic header value")?,
+        )),
+    }
+}
+
+fn magic_header_spec(spec: &str) -> Option<AmneziaWireguardRange<u32>> {
+    let end = |digits: &str| digits.parse().ok();
+    match spec.split_once('-') {
+        Some((lo, hi)) => Some(AmneziaWireguardRange {
+            lo: end(lo)?,
+            hi: end(hi)?,
+        }),
+        None => end(spec).map(AmneziaWireguardRange::from),
     }
 }
 
@@ -113,28 +98,20 @@ pub enum AmneziaWireguardAttribute {
     Flags(AmneziaWireguardDeviceFlags),
     // Amnezia attributes
     Peer(AmneziaWireguardPeer),
-    JC(u16),   // JunkCount
+    Jc(u16),   // JunkCount
     Jmin(u16), // JunkPacketMinSize
     Jmax(u16), // JunkPacketMaxSize
     S1(u16),
     S2(u16),
-    /// Magic header spec, e.g. `"61220074"` or `"684141592-1751861769"`.
-    ///
-    /// Emitted as a NUL-terminated string, understood by kernel modules up
-    /// to genl family version 2 (v1.0.20260725). When parsing, all wire
-    /// formats (string, `u32`, packed `u64` range) are normalized into this
-    /// variant.
-    H1(String),
-    H2(String),
-    H3(String),
-    H4(String),
-    /// Magic header as a range, the wire format of the AmneziaWG 3.0 kernel
-    /// module (genl family version 3). A spec string parses into one. Never
-    /// produced by parsing; see the `H1`..`H4` variants.
-    H1Range(Range<u32>),
-    H2Range(Range<u32>),
-    H3Range(Range<u32>),
-    H4Range(Range<u32>),
+    /// Magic header: the type a packet of its kind is sent with, drawn out
+    /// of the range, and the only ones matched on receiving. Here the zero
+    /// range is the value 0, not "unset". Emitted in the form of the
+    /// AmneziaWG 3.0 kernel module (genl family version 3); the number and
+    /// the string older modules send are read into the same range.
+    H1(AmneziaWireguardRange<u32>),
+    H2(AmneziaWireguardRange<u32>),
+    H3(AmneziaWireguardRange<u32>),
+    H4(AmneziaWireguardRange<u32>),
     S3(u16),
     S4(u16),
     /// Intermediate header descriptor string.
@@ -145,19 +122,24 @@ pub enum AmneziaWireguardAttribute {
     I5(String),
     // AmneziaWG 3.0 attributes
     HeaderProtectionKey([u8; HEADER_PROTECTION_KEY_LEN]),
-    /// Bytes of padding added to a data packet.
-    ContentPaddingAddition(Range<u16>),
+    /// Bytes of padding a data packet gets in place of its usual padding,
+    /// as far as the packet has room for them.
+    ContentPaddingAddition(AmneziaWireguardRange<u16>),
     /// Seconds after which a session key is renewed.
-    RekeyAfterTime(Range<u16>),
+    RekeyAfterTime(AmneziaWireguardRange<u16>),
     /// Seconds after which an unanswered handshake is sent again.
-    RekeyTimeout(Range<u16>),
-    /// Seconds after which a session key is no longer used.
-    RejectAfterTime(Range<u16>),
+    RekeyTimeout(AmneziaWireguardRange<u16>),
+    /// Seconds that set two things: a peer's keys are wiped three times as
+    /// long after a handshake, and the initiator renews a key on receiving
+    /// once it is older than this less the keepalive and rekey timeouts. A
+    /// key stops being used after the module's constant of 180 seconds
+    /// whatever is set here.
+    RejectAfterTime(AmneziaWireguardRange<u16>),
     /// Seconds of receiving without sending after which a keepalive goes
     /// out.
-    KeepaliveTimeout(Range<u16>),
+    KeepaliveTimeout(AmneziaWireguardRange<u16>),
     /// Handshake retries before giving up.
-    MaxHandshakeAttempts(Range<u16>),
+    MaxHandshakeAttempts(AmneziaWireguardRange<u16>),
     // AmneziaWG 3.1 attributes (genl family version is still 3; only the
     // 3.1+ kernel module accepts them).
     RandomTrailers(bool),
@@ -204,15 +186,7 @@ impl Nla for AmneziaWireguardAttribute {
             return v.value_len();
         }
         match self {
-            Self::H1(v)
-            | Self::H2(v)
-            | Self::H3(v)
-            | Self::H4(v)
-            | Self::I1(v)
-            | Self::I2(v)
-            | Self::I3(v)
-            | Self::I4(v)
-            | Self::I5(v) => v.len() + 1,
+            Self::I1(v) | Self::I2(v) | Self::I3(v) | Self::I4(v) | Self::I5(v) => v.len() + 1,
             Self::HeaderProtectionKey(_) => HEADER_PROTECTION_KEY_LEN,
             Self::Peers(v) => v.as_slice().buffer_len(),
             Self::Peer(v) => v.value_len(),
@@ -222,9 +196,9 @@ impl Nla for AmneziaWireguardAttribute {
             | Self::RejectAfterTime(_)
             | Self::KeepaliveTimeout(_)
             | Self::MaxHandshakeAttempts(_) => 4,
-            Self::H1Range(_) | Self::H2Range(_) | Self::H3Range(_) | Self::H4Range(_) => 8,
+            Self::H1(_) | Self::H2(_) | Self::H3(_) | Self::H4(_) => 8,
             Self::RandomTrailers(_) | Self::DisableCookies(_) => 1,
-            Self::JC(_)
+            Self::Jc(_)
             | Self::Jmax(_)
             | Self::Jmin(_)
             | Self::S1(_)
@@ -249,15 +223,15 @@ impl Nla for AmneziaWireguardAttribute {
         match self {
             Self::Peers(_) => WGDEVICE_A_PEERS | NLA_F_NESTED,
             Self::Peer(_) => WGDEVICE_A_PEER | NLA_F_NESTED,
-            Self::JC(_) => WGDEVICE_A_JC,
+            Self::Jc(_) => WGDEVICE_A_JC,
             Self::Jmin(_) => WGDEVICE_A_JMIN,
             Self::Jmax(_) => WGDEVICE_A_JMAX,
             Self::S1(_) => WGDEVICE_A_S1,
             Self::S2(_) => WGDEVICE_A_S2,
-            Self::H1(_) | Self::H1Range(_) => WGDEVICE_A_H1,
-            Self::H2(_) | Self::H2Range(_) => WGDEVICE_A_H2,
-            Self::H3(_) | Self::H3Range(_) => WGDEVICE_A_H3,
-            Self::H4(_) | Self::H4Range(_) => WGDEVICE_A_H4,
+            Self::H1(_) => WGDEVICE_A_H1,
+            Self::H2(_) => WGDEVICE_A_H2,
+            Self::H3(_) => WGDEVICE_A_H3,
+            Self::H4(_) => WGDEVICE_A_H4,
             Self::S3(_) => WGDEVICE_A_S3,
             Self::S4(_) => WGDEVICE_A_S4,
             Self::I1(_) => WGDEVICE_A_I1,
@@ -290,22 +264,14 @@ impl Nla for AmneziaWireguardAttribute {
             return v.emit_value(buffer);
         }
         match self {
-            Self::H1(s)
-            | Self::H2(s)
-            | Self::H3(s)
-            | Self::H4(s)
-            | Self::I1(s)
-            | Self::I2(s)
-            | Self::I3(s)
-            | Self::I4(s)
-            | Self::I5(s) => {
+            Self::I1(s) | Self::I2(s) | Self::I3(s) | Self::I4(s) | Self::I5(s) => {
                 buffer[..s.len()].copy_from_slice(s.as_bytes());
                 buffer[s.len()] = 0;
             }
             Self::HeaderProtectionKey(v) => buffer.copy_from_slice(v),
             Self::Peers(v) => v.as_slice().emit(buffer),
             Self::Peer(v) => v.emit_value(buffer),
-            Self::H1Range(v) | Self::H2Range(v) | Self::H3Range(v) | Self::H4Range(v) => {
+            Self::H1(v) | Self::H2(v) | Self::H3(v) | Self::H4(v) => {
                 emit_u64(buffer, v.to_wire()).unwrap()
             }
             Self::ContentPaddingAddition(v)
@@ -314,7 +280,7 @@ impl Nla for AmneziaWireguardAttribute {
             | Self::RejectAfterTime(v)
             | Self::KeepaliveTimeout(v)
             | Self::MaxHandshakeAttempts(v) => emit_u32(buffer, v.to_wire()).unwrap(),
-            Self::JC(v)
+            Self::Jc(v)
             | Self::Jmin(v)
             | Self::Jmax(v)
             | Self::S1(v)
@@ -353,7 +319,7 @@ impl AmneziaWireguardAttribute {
         let u16_range_attr = |name: &'static str| {
             parse_u32(payload)
                 .context(format!("invalid {name} value"))
-                .map(Range::<u16>::from_wire)
+                .map(AmneziaWireguardRange::<u16>::from_wire)
         };
         let string_attr =
             |name: &'static str| parse_string(payload).context(format!("invalid {name} value"));
@@ -374,7 +340,7 @@ impl AmneziaWireguardAttribute {
             WGDEVICE_A_PEER => Self::Peer(
                 AmneziaWireguardPeer::parse(buf).context("invalid WGDEVICE_A_PEER value")?,
             ),
-            WGDEVICE_A_JC => Self::JC(u16_attr("WGDEVICE_A_JC")?),
+            WGDEVICE_A_JC => Self::Jc(u16_attr("WGDEVICE_A_JC")?),
             WGDEVICE_A_JMIN => Self::Jmin(u16_attr("WGDEVICE_A_JMIN")?),
             WGDEVICE_A_JMAX => Self::Jmax(u16_attr("WGDEVICE_A_JMAX")?),
             WGDEVICE_A_S1 => Self::S1(u16_attr("WGDEVICE_A_S1")?),

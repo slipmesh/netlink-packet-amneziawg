@@ -85,7 +85,7 @@ fn print_wg_payload(wg: AmneziaWireguardMessage) {
                     print_wg_peer(peer);
                 }
             }
-            AmneziaWireguardAttribute::JC(v) => {
+            AmneziaWireguardAttribute::Jc(v) => {
                 println!("JunkCount: {}", v)
             }
             AmneziaWireguardAttribute::Jmin(v) => {
@@ -113,7 +113,7 @@ fn print_wg_peer(attrs: &[AmneziaWireguardPeerAttribute]) {
                 println!("  Endpoint: {}", v)
             }
             AmneziaWireguardPeerAttribute::PersistentKeepalive(v) => {
-                println!("  PersistentKeepalive: {}", v)
+                println!("  PersistentKeepalive: {}-{}", v.lo, v.hi)
             }
             AmneziaWireguardPeerAttribute::LastHandshake(v) => {
                 println!("  LastHandshake: {:?}", v)

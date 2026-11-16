@@ -12,11 +12,15 @@ crate; this one adds:
 - the `amneziawg` generic netlink family;
 - the device attributes AmneziaWG appends (junk packets, magic headers,
   header protection, timers, the 3.1 flags) and `WGDEVICE_A_PEER`;
-- the peer keepalive, which the AmneziaWG 3.0 module sends as a `u32` range
-  instead of WireGuard's `u16`;
-- `range::Range`, the type of every attribute the AmneziaWG 3.0 module takes as
-  a range: `u32` ends for the magic headers, `u16` ends for the keepalive and
-  the device timing and padding attributes. One value `v` is `Range::from(v)`.
+- the peer keepalive, which AmneziaWG 3.0 made a range;
+- `AmneziaWireguardRange`, the value of every attribute the AmneziaWG 3.0
+  module takes as a range: the magic headers, the keepalive and the device
+  timing and padding attributes. One value `v` is `v.into()`.
+
+Ranges are emitted in the form of the AmneziaWG 3.0 module (genl family
+version 3). The forms older modules send, a magic header as a number or a
+string and the keepalive as one interval, are read into the same ranges, so a
+device of an older module can be read and not configured.
 
 Allowed IPs, flags, timestamps and commands are the upstream types, re-exported
 under `AmneziaWireguard*` names.
@@ -28,7 +32,7 @@ The crate is not published on crates.io. Add it as a git dependency on a release
 
 ```toml
 [dependencies]
-netlink-packet-amneziawg = { git = "https://github.com/slipmesh/netlink-packet-amneziawg", tag = "v0.1.0" }
+netlink-packet-amneziawg = { git = "https://github.com/slipmesh/netlink-packet-amneziawg", tag = "v0.2.0" }
 ```
 
 ## Usage
@@ -43,10 +47,12 @@ cargo test
 ```
 
 The integration tests in `tests/integration.rs` create `amneziawg` interfaces.
-They need the AmneziaWG kernel module and root, and skip themselves otherwise:
+They need the AmneziaWG kernel module and root, and skip themselves otherwise.
+`AWG_INTEGRATION=1` makes a test that cannot reach the module fail instead of
+skip:
 
 ```bash
-sudo -E env "PATH=$PATH" cargo test --test integration
+sudo -E env "PATH=$PATH" AWG_INTEGRATION=1 cargo test --test integration
 ```
 
 ## Release

@@ -14,7 +14,7 @@ use crate::{
     AmneziaWireguardAddressFamily, AmneziaWireguardAllowedIp, AmneziaWireguardAllowedIpAttr,
     AmneziaWireguardAttribute, AmneziaWireguardCmd, AmneziaWireguardDeviceFlags,
     AmneziaWireguardMessage, AmneziaWireguardPeer, AmneziaWireguardPeerAttribute,
-    AmneziaWireguardPeerFlags, AmneziaWireguardTimeSpec, range::Range,
+    AmneziaWireguardPeerFlags, AmneziaWireguardRange, AmneziaWireguardTimeSpec,
 };
 
 // nlmon capture of netlink packet sent by `sudo wg` command with netlink
@@ -97,7 +97,7 @@ fn test_query_reply() {
                 seconds: 1769415834,
                 nano_seconds: 262671874,
             }),
-            AmneziaWireguardPeerAttribute::PersistentKeepalive(25),
+            AmneziaWireguardPeerAttribute::PersistentKeepalive(25.into()),
             AmneziaWireguardPeerAttribute::TxBytes(1917056),
             AmneziaWireguardPeerAttribute::RxBytes(30426264),
             AmneziaWireguardPeerAttribute::ProtocolVersion(1),
@@ -124,10 +124,14 @@ fn test_query_reply() {
         AmneziaWireguardMessage::parse_with_param(&raw[4..], header).unwrap(),
     );
 
-    let mut buffer = vec![0; expected.buffer_len() + header.buffer_len()];
-    header.emit(&mut buffer);
-    expected.emit(&mut buffer[4..]);
-    assert_eq!(&buffer, &raw);
+    // The keepalive in this capture is the 2-byte form of a module older than AmneziaWG 3.0 and
+    // is emitted in the 4-byte one, so what is emitted is compared after reading it back.
+    let mut buffer = vec![0; expected.buffer_len()];
+    expected.emit(&mut buffer);
+    assert_eq!(
+        expected,
+        AmneziaWireguardMessage::parse_with_param(&buffer, header).unwrap(),
+    );
 }
 
 // nlmon capture of kernel netlink packet reply of `sudo wg setconf` command
@@ -236,178 +240,120 @@ fn test_empty_peers_roundtrip() {
     assert_eq!(parse_msg(&buffer, 2), msg.attributes);
 }
 
-// Every attribute AmneziaWG adds, pinned to the bytes the kernel module expects. Values differ
-// per attribute so that two swapped kinds cannot pass. Range variants parse back as the string
-// variant with the same kind.
+// Every attribute AmneziaWG adds, pinned to the bytes the AmneziaWG 3.0 kernel module expects
+// and read back from them. Values differ per attribute so that two swapped kinds cannot pass.
 #[test]
 fn test_amnezia_attribute_wire_format() {
     use netlink_packet_core::NlaBuffer;
 
     use AmneziaWireguardAttribute as A;
+    use AmneziaWireguardPeerAttribute as P;
+    use AmneziaWireguardRange as R;
 
     let peer_key = [hex!("2400 0100").as_slice(), &[0x07; 32]].concat();
-    let rows: Vec<(A, Vec<u8>, A)> = vec![
-        (A::JC(1), hex!("0600 0900 0100 0000").into(), A::JC(1)),
-        (A::Jmin(2), hex!("0600 0a00 0200 0000").into(), A::Jmin(2)),
-        (A::Jmax(3), hex!("0600 0b00 0300 0000").into(), A::Jmax(3)),
-        (A::S1(4), hex!("0600 0c00 0400 0000").into(), A::S1(4)),
-        (A::S2(5), hex!("0600 0d00 0500 0000").into(), A::S2(5)),
-        (A::S3(6), hex!("0600 1300 0600 0000").into(), A::S3(6)),
-        (A::S4(7), hex!("0600 1400 0700 0000").into(), A::S4(7)),
+    let peers = |attr| A::Peers(vec![AmneziaWireguardPeer(vec![attr])]);
+    let rows: Vec<(A, Vec<u8>)> = vec![
+        (A::Jc(1), hex!("0600 0900 0100 0000").into()),
+        (A::Jmin(2), hex!("0600 0a00 0200 0000").into()),
+        (A::Jmax(3), hex!("0600 0b00 0300 0000").into()),
+        (A::S1(4), hex!("0600 0c00 0400 0000").into()),
+        (A::S2(5), hex!("0600 0d00 0500 0000").into()),
+        (A::S3(6), hex!("0600 1300 0600 0000").into()),
+        (A::S4(7), hex!("0600 1400 0700 0000").into()),
+        // Two u32 ends in a u64, low end first.
         (
-            A::H1("1".into()),
-            hex!("0600 0e00 3100 0000").into(),
-            A::H1("1".into()),
-        ),
-        (
-            A::H2("2".into()),
-            hex!("0600 0f00 3200 0000").into(),
-            A::H2("2".into()),
-        ),
-        (
-            A::H3("3".into()),
-            hex!("0600 1000 3300 0000").into(),
-            A::H3("3".into()),
-        ),
-        (
-            A::H4("4".into()),
-            hex!("0600 1100 3400 0000").into(),
-            A::H4("4".into()),
-        ),
-        (
-            A::H1Range(Range { lo: 1, hi: 2 }),
+            A::H1(R { lo: 1, hi: 2 }),
             hex!("0c00 0e00 0100 0000 0200 0000").into(),
-            A::H1("1-2".into()),
         ),
         (
-            A::H2Range(Range { lo: 3, hi: 4 }),
+            A::H2(R { lo: 3, hi: 4 }),
             hex!("0c00 0f00 0300 0000 0400 0000").into(),
-            A::H2("3-4".into()),
         ),
         (
-            A::H3Range(Range { lo: 5, hi: 6 }),
+            A::H3(R { lo: 5, hi: 6 }),
             hex!("0c00 1000 0500 0000 0600 0000").into(),
-            A::H3("5-6".into()),
         ),
         (
-            A::H4Range(Range { lo: 7, hi: 8 }),
+            A::H4(R { lo: 7, hi: 8 }),
             hex!("0c00 1100 0700 0000 0800 0000").into(),
-            A::H4("7-8".into()),
         ),
-        (
-            A::I1("a".into()),
-            hex!("0600 1500 6100 0000").into(),
-            A::I1("a".into()),
-        ),
-        (
-            A::I2("b".into()),
-            hex!("0600 1600 6200 0000").into(),
-            A::I2("b".into()),
-        ),
-        (
-            A::I3("c".into()),
-            hex!("0600 1700 6300 0000").into(),
-            A::I3("c".into()),
-        ),
-        (
-            A::I4("d".into()),
-            hex!("0600 1800 6400 0000").into(),
-            A::I4("d".into()),
-        ),
-        (
-            A::I5("e".into()),
-            hex!("0600 1900 6500 0000").into(),
-            A::I5("e".into()),
-        ),
+        (A::I1("a".into()), hex!("0600 1500 6100 0000").into()),
+        (A::I2("b".into()), hex!("0600 1600 6200 0000").into()),
+        (A::I3("c".into()), hex!("0600 1700 6300 0000").into()),
+        (A::I4("d".into()), hex!("0600 1800 6400 0000").into()),
+        (A::I5("e".into()), hex!("0600 1900 6500 0000").into()),
         (
             A::HeaderProtectionKey([0x11; 32]),
             [hex!("2400 1a00").as_slice(), &[0x11; 32]].concat(),
-            A::HeaderProtectionKey([0x11; 32]),
         ),
-        // Two u16 ends in a u32, low end first, like the keepalive below.
+        // Two u16 ends in a u32, low end first.
         (
-            A::ContentPaddingAddition(Range { lo: 9, hi: 25 }),
+            A::ContentPaddingAddition(R { lo: 9, hi: 25 }),
             hex!("0800 1b00 0900 1900").into(),
-            A::ContentPaddingAddition(Range { lo: 9, hi: 25 }),
         ),
         (
-            A::RekeyAfterTime(Range { lo: 10, hi: 26 }),
+            A::RekeyAfterTime(R { lo: 10, hi: 26 }),
             hex!("0800 1c00 0a00 1a00").into(),
-            A::RekeyAfterTime(Range { lo: 10, hi: 26 }),
         ),
         (
-            A::RekeyTimeout(Range { lo: 11, hi: 27 }),
+            A::RekeyTimeout(R { lo: 11, hi: 27 }),
             hex!("0800 1d00 0b00 1b00").into(),
-            A::RekeyTimeout(Range { lo: 11, hi: 27 }),
         ),
         (
-            A::RejectAfterTime(Range { lo: 12, hi: 28 }),
+            A::RejectAfterTime(R { lo: 12, hi: 28 }),
             hex!("0800 1e00 0c00 1c00").into(),
-            A::RejectAfterTime(Range { lo: 12, hi: 28 }),
         ),
         (
-            A::KeepaliveTimeout(Range { lo: 13, hi: 29 }),
+            A::KeepaliveTimeout(R { lo: 13, hi: 29 }),
             hex!("0800 1f00 0d00 1d00").into(),
-            A::KeepaliveTimeout(Range { lo: 13, hi: 29 }),
         ),
         (
-            A::MaxHandshakeAttempts(Range { lo: 14, hi: 30 }),
+            A::MaxHandshakeAttempts(R { lo: 14, hi: 30 }),
             hex!("0800 2000 0e00 1e00").into(),
-            A::MaxHandshakeAttempts(Range { lo: 14, hi: 30 }),
         ),
-        (
-            A::RandomTrailers(true),
-            hex!("0500 2100 0100 0000").into(),
-            A::RandomTrailers(true),
-        ),
-        (
-            A::DisableCookies(true),
-            hex!("0500 2200 0100 0000").into(),
-            A::DisableCookies(true),
-        ),
+        (A::RandomTrailers(true), hex!("0500 2100 0100 0000").into()),
+        (A::DisableCookies(true), hex!("0500 2200 0100 0000").into()),
         // WG_CMD_UNKNOWN_PEER nests the peer attributes directly under WGDEVICE_A_PEER, with no
         // per-peer header as in WGDEVICE_A_PEERS.
         (
-            A::Peer(AmneziaWireguardPeer(vec![
-                AmneziaWireguardPeerAttribute::PublicKey([0x07; 32]),
-            ])),
+            A::Peer(AmneziaWireguardPeer(vec![P::PublicKey([0x07; 32])])),
             [hex!("2800 1280").as_slice(), &peer_key].concat(),
-            A::Peer(AmneziaWireguardPeer(vec![
-                AmneziaWireguardPeerAttribute::PublicKey([0x07; 32]),
-            ])),
         ),
-        // The AmneziaWG 3.0 keepalive: two u16 ends in a u32, low end first.
         (
-            A::Peers(vec![AmneziaWireguardPeer(vec![
-                AmneziaWireguardPeerAttribute::PersistentKeepaliveRange(Range { lo: 25, hi: 30 }),
-            ])]),
+            peers(P::PersistentKeepalive(R { lo: 25, hi: 30 })),
             hex!("1000 0880 0c00 0080 0800 0500 1900 1e00").into(),
-            A::Peers(vec![AmneziaWireguardPeer(vec![
-                AmneziaWireguardPeerAttribute::PersistentKeepaliveRange(Range { lo: 25, hi: 30 }),
-            ])]),
         ),
-        // What a bare 25 in the attribute is to the module: the ends as they arrive, in any order.
+        // The ends are kept in the order they arrive.
         (
-            A::Peers(vec![AmneziaWireguardPeer(vec![
-                AmneziaWireguardPeerAttribute::PersistentKeepaliveRange(Range { lo: 25, hi: 0 }),
-            ])]),
+            peers(P::PersistentKeepalive(R { lo: 25, hi: 0 })),
             hex!("1000 0880 0c00 0080 0800 0500 1900 0000").into(),
-            A::Peers(vec![AmneziaWireguardPeer(vec![
-                AmneziaWireguardPeerAttribute::PersistentKeepaliveRange(Range { lo: 25, hi: 0 }),
-            ])]),
         ),
     ];
 
-    for (attr, wire, parsed) in rows {
+    for (attr, wire) in rows {
         let mut buf = vec![0; attr.buffer_len()];
         attr.emit(&mut buf);
         assert_eq!(buf, wire, "emitting {attr:?}");
         assert_eq!(
             A::parse(&NlaBuffer::new_checked(&wire).unwrap()).unwrap(),
-            parsed,
+            attr,
             "parsing {attr:?}"
         );
     }
+}
+
+// A module older than AmneziaWG 3.0 sends the keepalive as the 2 bytes WireGuard does.
+#[test]
+fn test_keepalive_of_an_older_module_is_the_range_of_one_value() {
+    use AmneziaWireguardPeerAttribute::PersistentKeepalive;
+
+    let peers = nla(8 | 0x8000, &nla(0x8000, &nla(5, &hex!("1900"))));
+    assert_eq!(
+        parse_msg(&peers, 2),
+        vec![AmneziaWireguardAttribute::Peers(vec![
+            AmneziaWireguardPeer(vec![PersistentKeepalive(25.into())])
+        ])]
+    );
 }
 
 // Kinds neither crate knows, such as the zero-length WGPEER_A_ADVANCED_SECURITY flag (11) the
@@ -441,22 +387,66 @@ fn test_unknown_attributes_roundtrip_as_other() {
 
 // The genl header carries the family version, which fixes the magic header wire type: an 8-byte
 // u64 range from a version 3 module stays a range even when its bytes read as a digit string,
-// and a version 1 u32 stays a number.
+// a version 2 string is read as a number or as `lo-hi`, and a version 1 u32 stays a number.
 #[test]
 fn test_magic_header_decoded_by_family_version() {
     use AmneziaWireguardAttribute::H1;
+    use AmneziaWireguardRange as R;
 
     let digits = nla(14, b"1234567\0");
-    assert_eq!(parse_msg(&digits, 3), vec![H1("875770417-3618357".into())]);
-    assert_eq!(parse_msg(&digits, 2), vec![H1("1234567".into())]);
-    assert_eq!(parse_msg(&nla(14, b"123\0"), 1), vec![H1("3355185".into())]);
+    let as_u64 = R {
+        lo: 875770417,
+        hi: 3618357,
+    };
+    assert_eq!(parse_msg(&digits, 3), vec![H1(as_u64)]);
+    assert_eq!(parse_msg(&digits, 2), vec![H1(1234567.into())]);
+    let spec = nla(14, b"61220074-118999195\0");
+    let range = R {
+        lo: 61220074,
+        hi: 118999195,
+    };
+    assert_eq!(parse_msg(&spec, 2), vec![H1(range)]);
+    assert_eq!(parse_msg(&nla(14, b"123\0"), 1), vec![H1(3355185.into())]);
 }
 
-// An attribute parsed on its own has no genl header, so the magic header wire type is guessed
-// from the payload length.
+// A reply has to be readable whatever the module holds, so the ends are not put in order; a
+// string that is no number and no two numbers around a dash is refused.
 #[test]
-fn test_magic_header_type_guessed_without_family_version() {
+fn test_magic_header_string_is_read_as_it_is_or_refused() {
+    use AmneziaWireguardAttribute::H1;
+
+    let parse = |spec: &[u8]| {
+        let header = GenlHeader {
+            cmd: AmneziaWireguardCmd::GetDevice.into(),
+            version: 2,
+        };
+        AmneziaWireguardMessage::parse_with_param(&nla(14, spec), header).map(|msg| msg.attributes)
+    };
+
+    assert_eq!(
+        parse(b"9-5\0").unwrap(),
+        vec![H1(AmneziaWireguardRange { lo: 9, hi: 5 })]
+    );
+    for spec in [
+        &b"\0"[..],
+        b"-\0",
+        b"5-\0",
+        b"-5\0",
+        b"1-2-3\0",
+        b"4294967296\0",
+    ] {
+        assert!(parse(spec).is_err(), "{spec:?}");
+    }
+}
+
+// An attribute parsed on its own has no genl header. It is read in the form this crate emits,
+// so that what is emitted is read back: the bytes of a range can spell a string of digits.
+#[test]
+fn test_magic_header_without_family_version_is_read_in_the_emitted_form() {
     use netlink_packet_core::NlaBuffer;
+
+    use AmneziaWireguardAttribute::H1;
+    use AmneziaWireguardRange as R;
 
     let parse = |payload: &[u8]| {
         let wire = nla(14, payload);
@@ -464,14 +454,84 @@ fn test_magic_header_type_guessed_without_family_version() {
     };
 
     assert_eq!(
-        parse(&hex!("7b00 0000")).unwrap(),
-        AmneziaWireguardAttribute::H1("123".into())
-    );
-    assert_eq!(
         parse(&hex!("0500 0000 0900 0000")).unwrap(),
-        AmneziaWireguardAttribute::H1("5-9".into())
+        H1(R { lo: 5, hi: 9 })
     );
+    let digits = R {
+        lo: 875770417,
+        hi: 3618357,
+    };
+    assert_eq!(parse(b"1234567\0").unwrap(), H1(digits));
+    assert!(parse(&hex!("7b00 0000")).is_err());
+    assert!(parse(b"5-9\0").is_err());
     assert!(parse(&hex!("0102")).is_err());
+}
+
+// Whatever the module holds is read and sent again as it is: a range with its ends out of
+// order, the zero range, the widest one.
+#[test]
+fn test_every_range_attribute_is_read_back_as_emitted() {
+    use netlink_packet_core::NlaBuffer;
+
+    use AmneziaWireguardAttribute as A;
+    use AmneziaWireguardPeerAttribute as P;
+    use AmneziaWireguardRange as R;
+
+    let mut attrs = Vec::new();
+    for range in [
+        R {
+            lo: 875770417,
+            hi: 3618357,
+        },
+        R::default(),
+        R {
+            lo: 0,
+            hi: u32::MAX,
+        },
+    ] {
+        attrs.extend([A::H1(range), A::H2(range), A::H3(range), A::H4(range)]);
+    }
+    for range in [
+        R { lo: 30, hi: 25 },
+        R::default(),
+        R {
+            lo: 0,
+            hi: u16::MAX,
+        },
+    ] {
+        attrs.extend([
+            A::ContentPaddingAddition(range),
+            A::RekeyAfterTime(range),
+            A::RekeyTimeout(range),
+            A::RejectAfterTime(range),
+            A::KeepaliveTimeout(range),
+            A::MaxHandshakeAttempts(range),
+            A::Peers(vec![AmneziaWireguardPeer(vec![P::PersistentKeepalive(
+                range,
+            )])]),
+        ]);
+    }
+
+    for attr in attrs {
+        let mut wire = vec![0; attr.buffer_len()];
+        attr.emit(&mut wire);
+        assert_eq!(
+            A::parse(&NlaBuffer::new_checked(&wire).unwrap()).unwrap(),
+            attr
+        );
+    }
+}
+
+// A payload shorter than the range is refused rather than read as part of one.
+#[test]
+fn test_range_attribute_of_a_wrong_length_is_refused() {
+    use netlink_packet_core::NlaBuffer;
+
+    for kind in 27..=32 {
+        let wire = nla(kind, &hex!("0900"));
+        let parsed = AmneziaWireguardAttribute::parse(&NlaBuffer::new_checked(&wire).unwrap());
+        assert!(parsed.is_err(), "kind {kind}: {parsed:?}");
+    }
 }
 
 #[test]
