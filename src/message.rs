@@ -8,7 +8,7 @@ use netlink_packet_generic::{GenlFamily, GenlHeader};
 use crate::{AmneziaWireguardAttribute, AmneziaWireguardCmd};
 
 const WG_FAMILY_NAME: &str = "amneziawg";
-const WG_FAMILY_VERSION: u8 = 2;
+const WG_FAMILY_VERSION: u8 = 3;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AmneziaWireguardMessage {

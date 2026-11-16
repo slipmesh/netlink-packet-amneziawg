@@ -59,11 +59,11 @@ async fn main() {
         AmneziaWireguardAttribute::ListenPort(51820),
         AmneziaWireguardAttribute::Fwmark(0),
         // Amnezia specific parameters
-        AmneziaWireguardAttribute::JC(4),
+        AmneziaWireguardAttribute::Jc(4),
         AmneziaWireguardAttribute::Jmin(40),
         AmneziaWireguardAttribute::Jmax(70),
         AmneziaWireguardAttribute::S1(0x5566),
-        AmneziaWireguardAttribute::H1("61220074".into()),
+        AmneziaWireguardAttribute::H1(61220074.into()),
         AmneziaWireguardAttribute::Peers(vec![AmneziaWireguardPeer(vec![
             AmneziaWireguardPeerAttribute::PublicKey(peer_pub_key),
             AmneziaWireguardPeerAttribute::Endpoint(SocketAddr::new(

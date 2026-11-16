@@ -3,9 +3,11 @@
 //! Integration tests that require a Linux kernel with the AmneziaWG module
 //! loaded and root privileges (CAP_NET_ADMIN).
 //!
-//! These tests are compiled only on Linux. They will soft-skip themselves
-//! when the AmneziaWG family is not available or the process lacks the
-//! privileges to create network interfaces.
+//! These tests are compiled only on Linux. They skip themselves when the
+//! AmneziaWG family is not available or the process lacks the privileges to
+//! create network interfaces; the ones that set ranges also skip on a module
+//! older than AmneziaWG 3.0. `AWG_INTEGRATION=1` says the run is meant to
+//! reach the module: then a test that cannot run here fails.
 
 #![cfg(target_os = "linux")]
 
@@ -14,7 +16,7 @@ use genetlink::GenetlinkHandle;
 use netlink_packet_amneziawg::{
     AmneziaWireguardAddressFamily, AmneziaWireguardAllowedIp, AmneziaWireguardAllowedIpAttr,
     AmneziaWireguardAttribute, AmneziaWireguardCmd, AmneziaWireguardMessage, AmneziaWireguardPeer,
-    AmneziaWireguardPeerAttribute, range::u32_range_from_string,
+    AmneziaWireguardPeerAttribute, AmneziaWireguardRange,
 };
 use netlink_packet_core::{NLM_F_ACK, NLM_F_DUMP, NLM_F_REQUEST, NetlinkMessage, NetlinkPayload};
 use netlink_packet_generic::{
@@ -26,25 +28,43 @@ use rtnetlink::{LinkMessageBuilder, LinkUnspec, packet_route::link::InfoKind};
 /// Serializes access to netlink interface creation/deletion across tests.
 static TEST_MUTEX: Mutex<()> = Mutex::new(());
 
+/// `None` for a test that cannot run here, so that it passes having asserted
+/// nothing; a failure instead when `AWG_INTEGRATION=1` asks for the module.
+fn skip<T>(reason: &str) -> Option<T> {
+    if std::env::var("AWG_INTEGRATION").as_deref() == Ok("1") {
+        panic!("AWG_INTEGRATION=1 and the test cannot run: {reason}");
+    }
+    eprintln!("Skipping integration test: {reason}");
+    None
+}
+
 /// A genetlink handle and the amneziawg family version, or `None` when the
 /// tests cannot run here.
 async fn setup() -> Option<(GenetlinkHandle, u32)> {
     if !nix::unistd::geteuid().is_root() {
-        eprintln!("Skipping integration test: not running as root");
-        return None;
+        return skip("not running as root");
     }
     let (connection, mut handle, _) = genetlink::new_connection().unwrap();
     tokio::spawn(connection);
     let Some(version) = family_version(&mut handle).await else {
-        eprintln!("Skipping integration test: amneziawg family not available");
-        return None;
+        return skip("amneziawg family not available");
     };
     Some((handle, version))
 }
 
+/// As [`setup`], for a test that sets ranges: they are emitted in the form
+/// of genl family version 3, which an older module does not take.
+async fn setup_for_ranges() -> Option<GenetlinkHandle> {
+    let (handle, version) = setup().await?;
+    if version < 3 {
+        return skip("the module is older than AmneziaWG 3.0");
+    }
+    Some(handle)
+}
+
 /// Queries the genl family version of the amneziawg module: 2 for the
-/// v1.0 module, 3 for AmneziaWG 3.0. The magic header and keepalive wire
-/// formats depend on it. `None` when the family is not registered.
+/// v1.0 module, 3 for AmneziaWG 3.0. `None` when the family is not
+/// registered.
 async fn family_version(handle: &mut GenetlinkHandle) -> Option<u32> {
     let genlmsg: GenlMessage<GenlCtrl> = GenlMessage::from_payload(GenlCtrl {
         cmd: GenlCtrlCmd::GetFamily,
@@ -170,26 +190,23 @@ async fn test_get_device_on_amneziawg_interface() {
 #[tokio::test]
 async fn test_set_and_get_amnezia_parameters() {
     use AmneziaWireguardAttribute as A;
+    use AmneziaWireguardRange as R;
 
     let _guard = TEST_MUTEX.lock().await;
-    let Some((mut handle, version)) = setup().await else {
+    let Some(mut handle) = setup_for_ranges().await else {
         return;
     };
 
-    let headers = [
-        "61220074-118999195",
-        "605047389-945520346",
-        "1477291385-1814368140",
-        "1951993942-1997499713",
-    ];
+    let header = |lo, hi| R::<u32> { lo, hi };
     let peer_key = [0x5a; 32];
+    let keepalive = AmneziaWireguardPeerAttribute::PersistentKeepalive(R { lo: 25, hi: 30 });
 
-    // Read back in the form the kernel reports, which is what SetDevice sends
-    // except where the module version picks the wire type.
-    // Header protection needs every S1..S4 padding to hold its 12-byte nonce.
-    let mut common = vec![
+    // Read back as set. Header protection needs every S1..S4 padding to hold
+    // its 12-byte nonce. The last two attributes need a 3.1 module; the genl
+    // family version does not tell 3.0 and 3.1 apart.
+    let device = vec![
         A::ListenPort(51820),
-        A::JC(4),
+        A::Jc(4),
         A::Jmin(40),
         A::Jmax(70),
         A::S1(92),
@@ -197,43 +214,20 @@ async fn test_set_and_get_amnezia_parameters() {
         A::S3(44),
         A::S4(29),
         A::I1("<r 149>".into()),
+        A::H1(header(61220074, 118999195)),
+        A::H2(header(605047389, 945520346)),
+        A::H3(header(1477291385, 1814368140)),
+        A::H4(header(1951993942, 1997499713)),
+        A::HeaderProtectionKey([0x11; 32]),
+        A::ContentPaddingAddition(R { lo: 0, hi: 16 }),
+        A::RekeyAfterTime(R::from(150)),
+        A::RekeyTimeout(R::from(6)),
+        A::RejectAfterTime(R { lo: 200, hi: 220 }),
+        A::KeepaliveTimeout(R::from(12)),
+        A::MaxHandshakeAttempts(R::from(20)),
+        A::RandomTrailers(true),
+        A::DisableCookies(true),
     ];
-    let read_headers = vec![
-        A::H1(headers[0].into()),
-        A::H2(headers[1].into()),
-        A::H3(headers[2].into()),
-        A::H4(headers[3].into()),
-    ];
-    let (set_headers, keepalive) = if version >= 3 {
-        let range = |i: usize| u32_range_from_string(headers[i]).unwrap();
-        // The AmneziaWG 3.1 attributes below need a 3.1 module; the genl family version
-        // does not tell 3.0 and 3.1 apart.
-        common.extend([
-            A::HeaderProtectionKey([0x11; 32]),
-            A::ContentPaddingAddition(16),
-            A::RekeyAfterTime(150),
-            A::RekeyTimeout(6),
-            A::RejectAfterTime(200),
-            A::KeepaliveTimeout(12),
-            A::MaxHandshakeAttempts(20),
-            A::RandomTrailers(true),
-            A::DisableCookies(true),
-        ]);
-        (
-            vec![
-                A::H1Range(range(0)),
-                A::H2Range(range(1)),
-                A::H3Range(range(2)),
-                A::H4Range(range(3)),
-            ],
-            AmneziaWireguardPeerAttribute::PersistentKeepaliveRange(25 | (25 << 16)),
-        )
-    } else {
-        (
-            read_headers.clone(),
-            AmneziaWireguardPeerAttribute::PersistentKeepalive(25),
-        )
-    };
     let allowed_ip = AmneziaWireguardAllowedIp(vec![
         AmneziaWireguardAllowedIpAttr::Family(AmneziaWireguardAddressFamily::Ipv4),
         AmneziaWireguardAllowedIpAttr::IpAddr([10, 99, 0, 0].into()),
@@ -245,8 +239,7 @@ async fn test_set_and_get_amnezia_parameters() {
         cmd: AmneziaWireguardCmd::SetDevice,
         attributes: [
             vec![A::IfName(interface.name.clone())],
-            common.clone(),
-            set_headers,
+            device.clone(),
             vec![A::Peers(vec![AmneziaWireguardPeer(vec![
                 AmneziaWireguardPeerAttribute::PublicKey(peer_key),
                 keepalive.clone(),
@@ -267,7 +260,7 @@ async fn test_set_and_get_amnezia_parameters() {
     let responses = responses.expect("get device");
     assert_eq!(responses.len(), 1, "expected one response for get device");
     let attrs = &responses[0].attributes;
-    for expected in common.iter().chain(&read_headers) {
+    for expected in &device {
         assert!(attrs.contains(expected), "{expected:?} not read back");
     }
 
@@ -301,5 +294,38 @@ async fn test_set_and_get_amnezia_parameters() {
     assert!(
         allowed_ip.iter().all(|attr| read_ip.contains(attr)),
         "allowed IP {read_ip:?} instead of {allowed_ip:?}"
+    );
+}
+
+// The module returns a range as it was given, so reading one back cannot show
+// its two ends swapped on the wire. Its overlap check can: with the ends
+// swapped these two ranges are both reversed, share nothing, and are taken.
+#[tokio::test]
+async fn test_overlapping_header_ranges_are_refused() {
+    use AmneziaWireguardAttribute as A;
+
+    let _guard = TEST_MUTEX.lock().await;
+    let Some(mut handle) = setup_for_ranges().await else {
+        return;
+    };
+
+    let interface = TestInterface::create("awg_ovl").await;
+    let set_msg = AmneziaWireguardMessage {
+        cmd: AmneziaWireguardCmd::SetDevice,
+        attributes: vec![
+            A::IfName(interface.name.clone()),
+            A::H1(AmneziaWireguardRange { lo: 10, hi: 20 }),
+            A::H2(AmneziaWireguardRange { lo: 15, hi: 30 }),
+        ],
+    };
+    let refused = send_request(&mut handle, set_msg, NLM_F_REQUEST | NLM_F_ACK).await;
+    // Deleted before asserting, so a failed assertion leaves no interface behind.
+    interface.delete().await;
+
+    let error = refused.expect_err("overlapping header ranges are taken");
+    assert_eq!(
+        error.raw_os_error(),
+        Some(nix::errno::Errno::EINVAL as i32),
+        "{error}"
     );
 }
