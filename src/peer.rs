@@ -8,7 +8,9 @@ use netlink_packet_core::{
 };
 use netlink_packet_wireguard::WireguardPeerAttribute;
 
-use crate::{AmneziaWireguardAllowedIp, AmneziaWireguardPeerFlags, AmneziaWireguardTimeSpec};
+use crate::{
+    AmneziaWireguardAllowedIp, AmneziaWireguardPeerFlags, AmneziaWireguardTimeSpec, range::Range,
+};
 
 const WGPEER_A_PERSISTENT_KEEPALIVE_INTERVAL: u16 = 5;
 const WGPEER_A_ALLOWEDIPS: u16 = 9;
@@ -71,14 +73,10 @@ pub enum AmneziaWireguardPeerAttribute {
     /// version 2 (v1.0.20260725). When parsing, a 2-byte payload produces
     /// this variant.
     PersistentKeepalive(u16),
-    /// Persistent keepalive as `u32` packing a `u16` range
-    /// (`lo | hi << 16`), the wire format of the AmneziaWG 3.0 kernel
-    /// module (genl family version 3). Produced by parsing 4-byte
-    /// payloads. An interval of `n` seconds is the range `n..n`, built with
-    /// [`crate::range::u16_range_pack`]; that is also how the module reports
-    /// an interval the 3.0 tools set. The number `n` alone is the range
-    /// `n..0`. Zero disables the keepalive.
-    PersistentKeepaliveRange(u32),
+    /// Persistent keepalive interval in seconds as a range, the wire format
+    /// of the AmneziaWG 3.0 kernel module (genl family version 3). Produced
+    /// by parsing 4-byte payloads.
+    PersistentKeepaliveRange(Range<u16>),
     LastHandshake(AmneziaWireguardTimeSpec),
     RxBytes(u64),
     TxBytes(u64),
@@ -137,7 +135,7 @@ impl AmneziaWireguardPeerAttribute {
 impl Nla for AmneziaWireguardPeerAttribute {
     fn value_len(&self) -> usize {
         match self {
-            Self::PersistentKeepaliveRange(v) => size_of_val(v),
+            Self::PersistentKeepaliveRange(v) => size_of_val(&v.to_wire()),
             Self::AllowedIps(v) => v.as_slice().buffer_len(),
             Self::Other(v) => v.value_len(),
             _ => self.upstream().value_len(),
@@ -155,7 +153,7 @@ impl Nla for AmneziaWireguardPeerAttribute {
 
     fn emit_value(&self, buffer: &mut [u8]) {
         match self {
-            Self::PersistentKeepaliveRange(v) => emit_u32(buffer, *v).unwrap(),
+            Self::PersistentKeepaliveRange(v) => emit_u32(buffer, v.to_wire()).unwrap(),
             Self::AllowedIps(v) => v.as_slice().emit(buffer),
             Self::Other(v) => v.emit_value(buffer),
             _ => self.upstream().emit_value(buffer),
@@ -167,9 +165,10 @@ impl<'a, T: AsRef<[u8]> + ?Sized> Parseable<NlaBuffer<&'a T>> for AmneziaWiregua
     fn parse(buf: &NlaBuffer<&'a T>) -> Result<Self, DecodeError> {
         let payload = buf.value();
         if buf.kind() == WGPEER_A_PERSISTENT_KEEPALIVE_INTERVAL && payload.len() == 4 {
-            return Ok(Self::PersistentKeepaliveRange(parse_u32(payload).context(
-                "invalid WGPEER_A_PERSISTENT_KEEPALIVE_INTERVAL value",
-            )?));
+            return Ok(Self::PersistentKeepaliveRange(Range::<u16>::from_wire(
+                parse_u32(payload)
+                    .context("invalid WGPEER_A_PERSISTENT_KEEPALIVE_INTERVAL value")?,
+            )));
         }
         let attr = WireguardPeerAttribute::parse(buf)?;
         match Self::from_wireguard(attr) {

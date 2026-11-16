@@ -7,8 +7,7 @@ use netlink_packet_core::{
 use netlink_packet_wireguard::WireguardAttribute;
 
 use crate::{
-    AmneziaWireguardDeviceFlags, AmneziaWireguardPeer, peer::AmneziaWireguardPeers,
-    range::u32_range_to_string,
+    AmneziaWireguardDeviceFlags, AmneziaWireguardPeer, peer::AmneziaWireguardPeers, range::Range,
 };
 
 const WG_KEY_LEN: usize = 32;
@@ -57,17 +56,18 @@ const WGDEVICE_A_DISABLE_COOKIES: u16 = 34;
 /// module and by `awg`(8) config files. A known `family_version` fixes the
 /// wire type; without it the type is guessed from the payload.
 fn parse_magic_header(payload: &[u8], family_version: Option<u8>) -> Result<String, DecodeError> {
+    let range = || {
+        parse_u64(payload)
+            .context("invalid u64 magic header value")
+            .map(|wire| Range::<u32>::from_wire(wire).to_string())
+    };
     match family_version {
         Some(1) => {
             return Ok(parse_u32(payload)
                 .context("invalid u32 magic header value")?
                 .to_string());
         }
-        Some(3..) => {
-            return Ok(u32_range_to_string(
-                parse_u64(payload).context("invalid u64 magic header value")?,
-            ));
-        }
+        Some(3..) => return range(),
         _ => {}
     }
     // A v1.0 string of exactly 7 digits plus NUL is also 8 bytes long, so
@@ -82,9 +82,7 @@ fn parse_magic_header(payload: &[u8], family_version: Option<u8>) -> Result<Stri
         return parse_string(payload).context("invalid magic header string");
     }
     match payload.len() {
-        8 => Ok(u32_range_to_string(
-            parse_u64(payload).context("invalid u64 magic header value")?,
-        )),
+        8 => range(),
         4 => Ok(parse_u32(payload)
             .context("invalid u32 magic header value")?
             .to_string()),
@@ -130,14 +128,13 @@ pub enum AmneziaWireguardAttribute {
     H2(String),
     H3(String),
     H4(String),
-    /// Magic header as a packed `u64` range (`lo | hi << 32`), the wire
-    /// format of the AmneziaWG 3.0 kernel module (genl family version 3).
-    /// Use [`crate::range::u32_range_from_string`] to build these from spec
-    /// strings. Never produced by parsing; see the `H1`..`H4` variants.
-    H1Range(u64),
-    H2Range(u64),
-    H3Range(u64),
-    H4Range(u64),
+    /// Magic header as a range, the wire format of the AmneziaWG 3.0 kernel
+    /// module (genl family version 3). A spec string parses into one. Never
+    /// produced by parsing; see the `H1`..`H4` variants.
+    H1Range(Range<u32>),
+    H2Range(Range<u32>),
+    H3Range(Range<u32>),
+    H4Range(Range<u32>),
     S3(u16),
     S4(u16),
     /// Intermediate header descriptor string.
@@ -148,31 +145,19 @@ pub enum AmneziaWireguardAttribute {
     I5(String),
     // AmneziaWG 3.0 attributes
     HeaderProtectionKey([u8; HEADER_PROTECTION_KEY_LEN]),
-    /// Bytes of padding added to a data packet, as a `u16` range packed
-    /// into a `u32` (`lo | hi << 16`), not a plain number: build the value
-    /// with [`crate::range::u16_range_pack`] and read it with
-    /// [`crate::range::u16_range_unpack`]. Zero adds no padding.
-    ContentPaddingAddition(u32),
-    /// Seconds after which a session key is renewed, as a packed `u16`
-    /// range like [`Self::ContentPaddingAddition`]. Zero selects the kernel
-    /// module's own constant.
-    RekeyAfterTime(u32),
-    /// Seconds after which an unanswered handshake is sent again, as a
-    /// packed `u16` range like [`Self::ContentPaddingAddition`]. Zero
-    /// selects the kernel module's own constant.
-    RekeyTimeout(u32),
-    /// Seconds after which a session key is no longer used, as a packed
-    /// `u16` range like [`Self::ContentPaddingAddition`]. Zero selects the
-    /// kernel module's own constant.
-    RejectAfterTime(u32),
+    /// Bytes of padding added to a data packet.
+    ContentPaddingAddition(Range<u16>),
+    /// Seconds after which a session key is renewed.
+    RekeyAfterTime(Range<u16>),
+    /// Seconds after which an unanswered handshake is sent again.
+    RekeyTimeout(Range<u16>),
+    /// Seconds after which a session key is no longer used.
+    RejectAfterTime(Range<u16>),
     /// Seconds of receiving without sending after which a keepalive goes
-    /// out, as a packed `u16` range like [`Self::ContentPaddingAddition`].
-    /// Zero selects the kernel module's own constant.
-    KeepaliveTimeout(u32),
-    /// Handshake retries before giving up, as a packed `u16` range like
-    /// [`Self::ContentPaddingAddition`]. Zero selects the kernel module's
-    /// own constant.
-    MaxHandshakeAttempts(u32),
+    /// out.
+    KeepaliveTimeout(Range<u16>),
+    /// Handshake retries before giving up.
+    MaxHandshakeAttempts(Range<u16>),
     // AmneziaWG 3.1 attributes (genl family version is still 3; only the
     // 3.1+ kernel module accepts them).
     RandomTrailers(bool),
@@ -321,14 +306,14 @@ impl Nla for AmneziaWireguardAttribute {
             Self::Peers(v) => v.as_slice().emit(buffer),
             Self::Peer(v) => v.emit_value(buffer),
             Self::H1Range(v) | Self::H2Range(v) | Self::H3Range(v) | Self::H4Range(v) => {
-                emit_u64(buffer, *v).unwrap()
+                emit_u64(buffer, v.to_wire()).unwrap()
             }
             Self::ContentPaddingAddition(v)
             | Self::RekeyAfterTime(v)
             | Self::RekeyTimeout(v)
             | Self::RejectAfterTime(v)
             | Self::KeepaliveTimeout(v)
-            | Self::MaxHandshakeAttempts(v) => emit_u32(buffer, *v).unwrap(),
+            | Self::MaxHandshakeAttempts(v) => emit_u32(buffer, v.to_wire()).unwrap(),
             Self::JC(v)
             | Self::Jmin(v)
             | Self::Jmax(v)
@@ -365,8 +350,11 @@ impl AmneziaWireguardAttribute {
         let payload = buf.value();
         let u16_attr =
             |name: &'static str| parse_u16(payload).context(format!("invalid {name} value"));
-        let u32_attr =
-            |name: &'static str| parse_u32(payload).context(format!("invalid {name} value"));
+        let u16_range_attr = |name: &'static str| {
+            parse_u32(payload)
+                .context(format!("invalid {name} value"))
+                .map(Range::<u16>::from_wire)
+        };
         let string_attr =
             |name: &'static str| parse_string(payload).context(format!("invalid {name} value"));
         let magic_header = |name: &'static str| {
@@ -406,20 +394,22 @@ impl AmneziaWireguardAttribute {
                 Self::HeaderProtectionKey(parse_key(payload, "WGDEVICE_A_HEADER_PROTECTION_KEY")?)
             }
             WGDEVICE_A_CONTENT_PADDING_ADDITION => {
-                Self::ContentPaddingAddition(u32_attr("WGDEVICE_A_CONTENT_PADDING_ADDITION")?)
+                Self::ContentPaddingAddition(u16_range_attr("WGDEVICE_A_CONTENT_PADDING_ADDITION")?)
             }
             WGDEVICE_A_REKEY_AFTER_TIME => {
-                Self::RekeyAfterTime(u32_attr("WGDEVICE_A_REKEY_AFTER_TIME")?)
+                Self::RekeyAfterTime(u16_range_attr("WGDEVICE_A_REKEY_AFTER_TIME")?)
             }
-            WGDEVICE_A_REKEY_TIMEOUT => Self::RekeyTimeout(u32_attr("WGDEVICE_A_REKEY_TIMEOUT")?),
+            WGDEVICE_A_REKEY_TIMEOUT => {
+                Self::RekeyTimeout(u16_range_attr("WGDEVICE_A_REKEY_TIMEOUT")?)
+            }
             WGDEVICE_A_REJECT_AFTER_TIME => {
-                Self::RejectAfterTime(u32_attr("WGDEVICE_A_REJECT_AFTER_TIME")?)
+                Self::RejectAfterTime(u16_range_attr("WGDEVICE_A_REJECT_AFTER_TIME")?)
             }
             WGDEVICE_A_KEEPALIVE_TIMEOUT => {
-                Self::KeepaliveTimeout(u32_attr("WGDEVICE_A_KEEPALIVE_TIMEOUT")?)
+                Self::KeepaliveTimeout(u16_range_attr("WGDEVICE_A_KEEPALIVE_TIMEOUT")?)
             }
             WGDEVICE_A_MAX_HANDSHAKE_ATTEMPTS => {
-                Self::MaxHandshakeAttempts(u32_attr("WGDEVICE_A_MAX_HANDSHAKE_ATTEMPTS")?)
+                Self::MaxHandshakeAttempts(u16_range_attr("WGDEVICE_A_MAX_HANDSHAKE_ATTEMPTS")?)
             }
             WGDEVICE_A_RANDOM_TRAILERS => {
                 Self::RandomTrailers(flag_attr("WGDEVICE_A_RANDOM_TRAILERS")?)

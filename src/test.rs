@@ -14,7 +14,7 @@ use crate::{
     AmneziaWireguardAddressFamily, AmneziaWireguardAllowedIp, AmneziaWireguardAllowedIpAttr,
     AmneziaWireguardAttribute, AmneziaWireguardCmd, AmneziaWireguardDeviceFlags,
     AmneziaWireguardMessage, AmneziaWireguardPeer, AmneziaWireguardPeerAttribute,
-    AmneziaWireguardPeerFlags, AmneziaWireguardTimeSpec, range::u16_range_pack,
+    AmneziaWireguardPeerFlags, AmneziaWireguardTimeSpec, range::Range,
 };
 
 // nlmon capture of netlink packet sent by `sudo wg` command with netlink
@@ -275,22 +275,22 @@ fn test_amnezia_attribute_wire_format() {
             A::H4("4".into()),
         ),
         (
-            A::H1Range(0x0000_0002_0000_0001),
+            A::H1Range(Range { lo: 1, hi: 2 }),
             hex!("0c00 0e00 0100 0000 0200 0000").into(),
             A::H1("1-2".into()),
         ),
         (
-            A::H2Range(0x0000_0004_0000_0003),
+            A::H2Range(Range { lo: 3, hi: 4 }),
             hex!("0c00 0f00 0300 0000 0400 0000").into(),
             A::H2("3-4".into()),
         ),
         (
-            A::H3Range(0x0000_0006_0000_0005),
+            A::H3Range(Range { lo: 5, hi: 6 }),
             hex!("0c00 1000 0500 0000 0600 0000").into(),
             A::H3("5-6".into()),
         ),
         (
-            A::H4Range(0x0000_0008_0000_0007),
+            A::H4Range(Range { lo: 7, hi: 8 }),
             hex!("0c00 1100 0700 0000 0800 0000").into(),
             A::H4("7-8".into()),
         ),
@@ -324,36 +324,36 @@ fn test_amnezia_attribute_wire_format() {
             [hex!("2400 1a00").as_slice(), &[0x11; 32]].concat(),
             A::HeaderProtectionKey([0x11; 32]),
         ),
-        // A u32 packing a u16 range, low half first, like the keepalive below.
+        // Two u16 ends in a u32, low end first, like the keepalive below.
         (
-            A::ContentPaddingAddition(u16_range_pack(9, 25)),
+            A::ContentPaddingAddition(Range { lo: 9, hi: 25 }),
             hex!("0800 1b00 0900 1900").into(),
-            A::ContentPaddingAddition(u16_range_pack(9, 25)),
+            A::ContentPaddingAddition(Range { lo: 9, hi: 25 }),
         ),
         (
-            A::RekeyAfterTime(u16_range_pack(10, 26)),
+            A::RekeyAfterTime(Range { lo: 10, hi: 26 }),
             hex!("0800 1c00 0a00 1a00").into(),
-            A::RekeyAfterTime(u16_range_pack(10, 26)),
+            A::RekeyAfterTime(Range { lo: 10, hi: 26 }),
         ),
         (
-            A::RekeyTimeout(u16_range_pack(11, 27)),
+            A::RekeyTimeout(Range { lo: 11, hi: 27 }),
             hex!("0800 1d00 0b00 1b00").into(),
-            A::RekeyTimeout(u16_range_pack(11, 27)),
+            A::RekeyTimeout(Range { lo: 11, hi: 27 }),
         ),
         (
-            A::RejectAfterTime(u16_range_pack(12, 28)),
+            A::RejectAfterTime(Range { lo: 12, hi: 28 }),
             hex!("0800 1e00 0c00 1c00").into(),
-            A::RejectAfterTime(u16_range_pack(12, 28)),
+            A::RejectAfterTime(Range { lo: 12, hi: 28 }),
         ),
         (
-            A::KeepaliveTimeout(u16_range_pack(13, 29)),
+            A::KeepaliveTimeout(Range { lo: 13, hi: 29 }),
             hex!("0800 1f00 0d00 1d00").into(),
-            A::KeepaliveTimeout(u16_range_pack(13, 29)),
+            A::KeepaliveTimeout(Range { lo: 13, hi: 29 }),
         ),
         (
-            A::MaxHandshakeAttempts(u16_range_pack(14, 30)),
+            A::MaxHandshakeAttempts(Range { lo: 14, hi: 30 }),
             hex!("0800 2000 0e00 1e00").into(),
-            A::MaxHandshakeAttempts(u16_range_pack(14, 30)),
+            A::MaxHandshakeAttempts(Range { lo: 14, hi: 30 }),
         ),
         (
             A::RandomTrailers(true),
@@ -376,14 +376,24 @@ fn test_amnezia_attribute_wire_format() {
                 AmneziaWireguardPeerAttribute::PublicKey([0x07; 32]),
             ])),
         ),
-        // The AmneziaWG 3.0 keepalive is a u32 packing a u16 range, low half first.
+        // The AmneziaWG 3.0 keepalive: two u16 ends in a u32, low end first.
         (
             A::Peers(vec![AmneziaWireguardPeer(vec![
-                AmneziaWireguardPeerAttribute::PersistentKeepaliveRange(u16_range_pack(25, 30)),
+                AmneziaWireguardPeerAttribute::PersistentKeepaliveRange(Range { lo: 25, hi: 30 }),
             ])]),
             hex!("1000 0880 0c00 0080 0800 0500 1900 1e00").into(),
             A::Peers(vec![AmneziaWireguardPeer(vec![
-                AmneziaWireguardPeerAttribute::PersistentKeepaliveRange(u16_range_pack(25, 30)),
+                AmneziaWireguardPeerAttribute::PersistentKeepaliveRange(Range { lo: 25, hi: 30 }),
+            ])]),
+        ),
+        // What a bare 25 in the attribute is to the module: the ends as they arrive, in any order.
+        (
+            A::Peers(vec![AmneziaWireguardPeer(vec![
+                AmneziaWireguardPeerAttribute::PersistentKeepaliveRange(Range { lo: 25, hi: 0 }),
+            ])]),
+            hex!("1000 0880 0c00 0080 0800 0500 1900 0000").into(),
+            A::Peers(vec![AmneziaWireguardPeer(vec![
+                AmneziaWireguardPeerAttribute::PersistentKeepaliveRange(Range { lo: 25, hi: 0 }),
             ])]),
         ),
     ];
