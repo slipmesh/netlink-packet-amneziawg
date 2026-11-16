@@ -17,7 +17,7 @@ use std::str::FromStr;
 ///
 /// The module does not check that `lo <= hi` and neither does this type, so
 /// that a range read back from the module is the one it holds.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Range<T> {
     pub lo: T,
     pub hi: T,
