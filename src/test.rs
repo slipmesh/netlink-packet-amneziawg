@@ -532,7 +532,7 @@ fn test_every_range_attribute_is_read_back_as_emitted() {
     }
 }
 
-// A payload shorter than the range is refused rather than read as part of one.
+// A payload of a length other than the range's is refused rather than read as part of one.
 #[test]
 fn test_range_attribute_of_a_wrong_length_is_refused() {
     use netlink_packet_core::NlaBuffer;

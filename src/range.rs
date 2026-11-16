@@ -2,8 +2,9 @@
 
 /// A range of values the AmneziaWG 3.0 kernel module holds for an attribute,
 /// both ends included. Most uses draw a value out of it, not every use: some
-/// read one end, such as the low end of the rekey timeout. One value `v` is
-/// the range from `v` to `v`, which [`From`] builds.
+/// read one end, such as the low end of the rekey timeout and both ends of
+/// the keepalive timeout. One value `v` is the range from `v` to `v`, which
+/// [`From`] builds.
 ///
 /// On the wire the two ends share one integer, the low end in the low half:
 /// `u32` ends in a `u64` for the magic headers, `u16` ends in a `u32` for the

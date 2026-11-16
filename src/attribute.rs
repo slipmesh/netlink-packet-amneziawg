@@ -77,13 +77,7 @@ fn magic_header_spec(payload: &[u8]) -> Option<AmneziaWireguardRange<u32>> {
         return None;
     }
     let spec = std::str::from_utf8(spec).ok()?;
-    let end = |digits: &str| {
-        if digits.is_empty() {
-            None
-        } else {
-            digits.parse().ok()
-        }
-    };
+    let end = |digits: &str| digits.parse().ok();
     match spec.split_once('-') {
         Some((lo, hi)) => Some(AmneziaWireguardRange {
             lo: end(lo)?,
@@ -155,10 +149,11 @@ pub enum AmneziaWireguardAttribute {
     /// whatever is set here.
     RejectAfterTime(AmneziaWireguardRange<u16>),
     /// Seconds of receiving without sending after which a keepalive goes
-    /// out.
+    /// out. Its high end also times a new handshake when sent data goes
+    /// unanswered: one starts after it plus a drawn rekey timeout.
     KeepaliveTimeout(AmneziaWireguardRange<u16>),
     /// Retries of a handshake: the module gives up once the count of retries
-    /// is above this value, so after this value plus one.
+    /// is above this value, so after this value plus one retries.
     MaxHandshakeAttempts(AmneziaWireguardRange<u16>),
     // AmneziaWG 3.1 attributes (genl family version is still 3; only the
     // 3.1+ kernel module accepts them).
