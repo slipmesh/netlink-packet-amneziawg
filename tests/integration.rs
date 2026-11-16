@@ -14,7 +14,8 @@ use genetlink::GenetlinkHandle;
 use netlink_packet_amneziawg::{
     AmneziaWireguardAddressFamily, AmneziaWireguardAllowedIp, AmneziaWireguardAllowedIpAttr,
     AmneziaWireguardAttribute, AmneziaWireguardCmd, AmneziaWireguardMessage, AmneziaWireguardPeer,
-    AmneziaWireguardPeerAttribute, range::u32_range_from_string,
+    AmneziaWireguardPeerAttribute,
+    range::{u16_range_pack, u32_range_from_string},
 };
 use netlink_packet_core::{NLM_F_ACK, NLM_F_DUMP, NLM_F_REQUEST, NetlinkMessage, NetlinkPayload};
 use netlink_packet_generic::{
@@ -210,12 +211,12 @@ async fn test_set_and_get_amnezia_parameters() {
         // does not tell 3.0 and 3.1 apart.
         common.extend([
             A::HeaderProtectionKey([0x11; 32]),
-            A::ContentPaddingAddition(16),
-            A::RekeyAfterTime(150),
-            A::RekeyTimeout(6),
-            A::RejectAfterTime(200),
-            A::KeepaliveTimeout(12),
-            A::MaxHandshakeAttempts(20),
+            A::ContentPaddingAddition(u16_range_pack(0, 16)),
+            A::RekeyAfterTime(u16_range_pack(150, 150)),
+            A::RekeyTimeout(u16_range_pack(6, 6)),
+            A::RejectAfterTime(u16_range_pack(200, 220)),
+            A::KeepaliveTimeout(u16_range_pack(12, 12)),
+            A::MaxHandshakeAttempts(u16_range_pack(20, 20)),
             A::RandomTrailers(true),
             A::DisableCookies(true),
         ]);
@@ -226,7 +227,7 @@ async fn test_set_and_get_amnezia_parameters() {
                 A::H3Range(range(2)),
                 A::H4Range(range(3)),
             ],
-            AmneziaWireguardPeerAttribute::PersistentKeepaliveRange(25 | (25 << 16)),
+            AmneziaWireguardPeerAttribute::PersistentKeepaliveRange(u16_range_pack(25, 25)),
         )
     } else {
         (

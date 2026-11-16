@@ -75,7 +75,8 @@ pub enum AmneziaWireguardPeerAttribute {
     /// (`lo | hi << 16`), the wire format of the AmneziaWG 3.0 kernel
     /// module (genl family version 3). Produced by parsing 4-byte
     /// payloads; a plain interval `v` sent by new tools arrives as
-    /// `v | v << 16`.
+    /// `v | v << 16`. Build the value with
+    /// [`crate::range::u16_range_pack`]: a bare `v` is the range `v..0`.
     PersistentKeepaliveRange(u32),
     LastHandshake(AmneziaWireguardTimeSpec),
     RxBytes(u64),

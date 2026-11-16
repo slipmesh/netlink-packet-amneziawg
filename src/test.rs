@@ -14,7 +14,7 @@ use crate::{
     AmneziaWireguardAddressFamily, AmneziaWireguardAllowedIp, AmneziaWireguardAllowedIpAttr,
     AmneziaWireguardAttribute, AmneziaWireguardCmd, AmneziaWireguardDeviceFlags,
     AmneziaWireguardMessage, AmneziaWireguardPeer, AmneziaWireguardPeerAttribute,
-    AmneziaWireguardPeerFlags, AmneziaWireguardTimeSpec,
+    AmneziaWireguardPeerFlags, AmneziaWireguardTimeSpec, range::u16_range_pack,
 };
 
 // nlmon capture of netlink packet sent by `sudo wg` command with netlink
@@ -324,35 +324,36 @@ fn test_amnezia_attribute_wire_format() {
             [hex!("2400 1a00").as_slice(), &[0x11; 32]].concat(),
             A::HeaderProtectionKey([0x11; 32]),
         ),
+        // A u32 packing a u16 range, low half first, like the keepalive below.
         (
-            A::ContentPaddingAddition(9),
-            hex!("0800 1b00 0900 0000").into(),
-            A::ContentPaddingAddition(9),
+            A::ContentPaddingAddition(u16_range_pack(9, 25)),
+            hex!("0800 1b00 0900 1900").into(),
+            A::ContentPaddingAddition(u16_range_pack(9, 25)),
         ),
         (
-            A::RekeyAfterTime(10),
-            hex!("0800 1c00 0a00 0000").into(),
-            A::RekeyAfterTime(10),
+            A::RekeyAfterTime(u16_range_pack(10, 26)),
+            hex!("0800 1c00 0a00 1a00").into(),
+            A::RekeyAfterTime(u16_range_pack(10, 26)),
         ),
         (
-            A::RekeyTimeout(11),
-            hex!("0800 1d00 0b00 0000").into(),
-            A::RekeyTimeout(11),
+            A::RekeyTimeout(u16_range_pack(11, 27)),
+            hex!("0800 1d00 0b00 1b00").into(),
+            A::RekeyTimeout(u16_range_pack(11, 27)),
         ),
         (
-            A::RejectAfterTime(12),
-            hex!("0800 1e00 0c00 0000").into(),
-            A::RejectAfterTime(12),
+            A::RejectAfterTime(u16_range_pack(12, 28)),
+            hex!("0800 1e00 0c00 1c00").into(),
+            A::RejectAfterTime(u16_range_pack(12, 28)),
         ),
         (
-            A::KeepaliveTimeout(13),
-            hex!("0800 1f00 0d00 0000").into(),
-            A::KeepaliveTimeout(13),
+            A::KeepaliveTimeout(u16_range_pack(13, 29)),
+            hex!("0800 1f00 0d00 1d00").into(),
+            A::KeepaliveTimeout(u16_range_pack(13, 29)),
         ),
         (
-            A::MaxHandshakeAttempts(14),
-            hex!("0800 2000 0e00 0000").into(),
-            A::MaxHandshakeAttempts(14),
+            A::MaxHandshakeAttempts(u16_range_pack(14, 30)),
+            hex!("0800 2000 0e00 1e00").into(),
+            A::MaxHandshakeAttempts(u16_range_pack(14, 30)),
         ),
         (
             A::RandomTrailers(true),
@@ -378,11 +379,11 @@ fn test_amnezia_attribute_wire_format() {
         // The AmneziaWG 3.0 keepalive is a u32 packing a u16 range, low half first.
         (
             A::Peers(vec![AmneziaWireguardPeer(vec![
-                AmneziaWireguardPeerAttribute::PersistentKeepaliveRange(0x001e_0019),
+                AmneziaWireguardPeerAttribute::PersistentKeepaliveRange(u16_range_pack(25, 30)),
             ])]),
             hex!("1000 0880 0c00 0080 0800 0500 1900 1e00").into(),
             A::Peers(vec![AmneziaWireguardPeer(vec![
-                AmneziaWireguardPeerAttribute::PersistentKeepaliveRange(0x001e_0019),
+                AmneziaWireguardPeerAttribute::PersistentKeepaliveRange(u16_range_pack(25, 30)),
             ])]),
         ),
     ];

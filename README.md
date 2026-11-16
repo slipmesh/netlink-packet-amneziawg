@@ -13,7 +13,11 @@ crate; this one adds:
 - the device attributes AmneziaWG appends (junk packets, magic headers,
   header protection, timers, the 3.1 flags) and `WGDEVICE_A_PEER`;
 - the peer keepalive, which the AmneziaWG 3.0 module sends as a `u32` range
-  instead of WireGuard's `u16`.
+  instead of WireGuard's `u16`;
+- `range`, which packs and unpacks the two range wire formats: `u32` ends in a
+  `u64` for the magic headers, `u16` ends in a `u32` for the keepalive and the
+  device timing and padding attributes. A single value `v` goes out as the
+  range `v..v`, never as a bare `v`.
 
 Allowed IPs, flags, timestamps and commands are the upstream types, re-exported
 under `AmneziaWireguard*` names.

@@ -148,6 +148,11 @@ pub enum AmneziaWireguardAttribute {
     I5(String),
     // AmneziaWG 3.0 attributes
     HeaderProtectionKey([u8; HEADER_PROTECTION_KEY_LEN]),
+    /// This and the five variants below hold a `u16` range packed into a
+    /// `u32` (`lo | hi << 16`), not a plain number: build the value with
+    /// [`crate::range::u16_range_pack`] and read it with
+    /// [`crate::range::u16_range_unpack`]. Zero selects the kernel module's
+    /// own constant.
     ContentPaddingAddition(u32),
     RekeyAfterTime(u32),
     RekeyTimeout(u32),
