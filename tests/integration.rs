@@ -614,6 +614,7 @@ async fn exercise_link(handle: &mut GenetlinkHandle, a: &LinkEnd<'_>, b: &LinkEn
     let header_protection_key = random_key();
     let preshared_key = random_key();
     let obfuscation = link_obfuscation(header_protection_key);
+    let keepalive = P::PersistentKeepalive(AmneziaWireguardRange { lo: 1, hi: 2 });
 
     let mut public_keys = Vec::new();
     for end in [a, b] {
@@ -650,7 +651,7 @@ async fn exercise_link(handle: &mut GenetlinkHandle, a: &LinkEnd<'_>, b: &LinkEn
             P::PublicKey(peer_key),
             P::PresharedKey(preshared_key),
             P::Endpoint(SocketAddr::from((Ipv4Addr::LOCALHOST, peer.port))),
-            P::PersistentKeepalive(AmneziaWireguardRange::from(25)),
+            keepalive.clone(),
             P::AllowedIps(vec![allowed_ipv4(peer.address, 32)]),
         ]);
         set_device(handle, &end.interface.name, vec![A::Peers(vec![peer])]).await;
@@ -670,6 +671,10 @@ async fn exercise_link(handle: &mut GenetlinkHandle, a: &LinkEnd<'_>, b: &LinkEn
     for (end, (sent_out, sent_in)) in [(a, (sent[0], sent[1])), (b, (sent[1], sent[0]))] {
         let ifname = &end.interface.name;
         let (_, peer) = device_and_peer(handle, ifname).await;
+        assert!(
+            peer.contains(&keepalive),
+            "{ifname}: {keepalive:?} not read back"
+        );
         let handshake = peer.iter().find_map(|attr| match attr {
             P::LastHandshake(time) => Some(time),
             _ => None,
