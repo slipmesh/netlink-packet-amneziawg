@@ -50,7 +50,9 @@ cargo test
 The integration tests in `tests/integration.rs` create `amneziawg` interfaces.
 They need the AmneziaWG kernel module and root, and skip themselves otherwise;
 the ones that set ranges need AmneziaWG 3.0 or later and skip on an older
-module. `AWG_INTEGRATION=1` makes a test that cannot run here fail instead of
+module. Root needs `CAP_NET_ADMIN`, and the link tests also `CAP_NET_RAW`, for
+the packet socket that reads their tunnel: in a container that drops it, they
+skip. `AWG_INTEGRATION=1` makes a test that cannot run here fail instead of
 skip:
 
 ```bash
