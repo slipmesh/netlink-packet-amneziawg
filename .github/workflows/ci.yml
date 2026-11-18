@@ -19,16 +19,16 @@ permissions:
 
 jobs:
   checks:
-    uses: slipmesh/.github/.github/workflows/rust.yml@v2.4
+    uses: slipmesh/.github/.github/workflows/rust.yml@v4.0.2
 
   release-commit:
     if: github.event_name == 'push'
-    uses: slipmesh/.github/.github/workflows/release-commit.yml@v2.4
+    uses: slipmesh/.github/.github/workflows/release-commit.yml@v4.0.2
 
   tag:
     needs: [release-commit, checks]
     if: needs.release-commit.outputs.version != ''
-    uses: slipmesh/.github/.github/workflows/tag-release.yml@v2.4
+    uses: slipmesh/.github/.github/workflows/tag-release.yml@v4.0.2
     permissions:
       contents: write
     with:
@@ -36,7 +36,7 @@ jobs:
 
   release:
     needs: [release-commit, tag]
-    uses: slipmesh/.github/.github/workflows/release.yml@v2.4
+    uses: slipmesh/.github/.github/workflows/release.yml@v4.0.2
     permissions:
       contents: write
     with:
