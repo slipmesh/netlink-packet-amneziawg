@@ -268,10 +268,10 @@ async fn test_set_and_get_amnezia_parameters() {
     let keepalive = AmneziaWireguardPeerAttribute::PersistentKeepalive(R { lo: 25, hi: 30 });
 
     // Read back as set. Header protection needs every S1..S4 padding to hold
-    // its 12-byte nonce. The decoys use between them every tag the module
-    // parses. The tags `rc` and `rd` and the last two attributes need a 3.1
-    // module; the genl family version does not tell 3.0 and 3.1 apart.
-    let device = vec![
+    // its 12-byte nonce. The decoy tags `rc` and `rd` and the last two
+    // attributes need a 3.1 module; the genl family version does not tell 3.0
+    // and 3.1 apart.
+    let mut device = vec![
         A::ListenPort(51820),
         A::Fwmark(0x51),
         A::Jc(4),
@@ -281,11 +281,6 @@ async fn test_set_and_get_amnezia_parameters() {
         A::S2(115),
         A::S3(44),
         A::S4(29),
-        A::I1("<b 0xc0ffee01><r 149>".into()),
-        A::I2("<c><t>".into()),
-        A::I3("<rc 24>".into()),
-        A::I4("<rd 12>".into()),
-        A::I5("<b 0x5a5a><c><t><r 8><rc 8><rd 8>".into()),
         A::H1(header(61220074, 118999195)),
         A::H2(header(605047389, 945520346)),
         A::H3(header(1477291385, 1814368140)),
@@ -300,6 +295,7 @@ async fn test_set_and_get_amnezia_parameters() {
         A::RandomTrailers(true),
         A::DisableCookies(true),
     ];
+    device.extend(decoys());
     let allowed_ip = allowed_ipv4(Ipv4Addr::new(198, 51, 100, 0), 24);
 
     let interface = TestInterface::create("awg_set").await;
@@ -374,6 +370,18 @@ async fn test_set_and_get_amnezia_parameters() {
     }
 }
 
+/// Decoys that use between them every tag the module parses.
+fn decoys() -> [AmneziaWireguardAttribute; 5] {
+    use AmneziaWireguardAttribute as A;
+    [
+        A::I1("<b 0xc0ffee01><r 149>".into()),
+        A::I2("<c><t>".into()),
+        A::I3("<rc 24>".into()),
+        A::I4("<rd 12>".into()),
+        A::I5("<b 0x5a5a><c><t><r 8><rc 8><rd 8>".into()),
+    ]
+}
+
 fn empty_decoys() -> [AmneziaWireguardAttribute; 5] {
     use AmneziaWireguardAttribute as A;
     [
@@ -385,7 +393,6 @@ fn empty_decoys() -> [AmneziaWireguardAttribute; 5] {
     ]
 }
 
-/// Sets every decoy of the device to the empty text and reads the device back.
 async fn clear_decoys(
     handle: &mut GenetlinkHandle,
     ifname: &str,
@@ -454,11 +461,6 @@ fn link_obfuscation(header_protection_key: [u8; 32]) -> Vec<AmneziaWireguardAttr
         A::H2(R::from(605047389)),
         A::H3(R::from(1477291385)),
         A::H4(R::from(1951993942)),
-        A::I1("<b 0xc0ffee01><r 149>".into()),
-        A::I2("<c><t>".into()),
-        A::I3("<rc 24>".into()),
-        A::I4("<rd 12>".into()),
-        A::I5("<b 0x5a5a><c><t><r 8><rc 8><rd 8>".into()),
         A::HeaderProtectionKey(header_protection_key),
         A::ContentPaddingAddition(R::from(16)),
         A::RekeyAfterTime(R::from(150)),
@@ -469,6 +471,9 @@ fn link_obfuscation(header_protection_key: [u8; 32]) -> Vec<AmneziaWireguardAttr
         A::RandomTrailers(true),
         A::DisableCookies(true),
     ]
+    .into_iter()
+    .chain(decoys())
+    .collect()
 }
 
 /// One end of the link: its interface, its address in the tunnel and the
@@ -503,7 +508,6 @@ async fn set_device(
         .unwrap_or_else(|e| panic!("set device {ifname}: {e}"));
 }
 
-/// The device's attributes and those of its only peer.
 async fn device_and_peer(
     handle: &mut GenetlinkHandle,
     ifname: &str,
@@ -541,7 +545,6 @@ fn tunnel_tap() -> OwnedFd {
     tap
 }
 
-/// The UDP payload of an IPv4 packet from `src` to `dst`.
 fn udp_payload(packet: &[u8], src: Ipv4Addr, dst: Ipv4Addr) -> Option<&[u8]> {
     let header_len = usize::from(packet.first()? & 0x0f) * 4;
     let is_ipv4_udp = packet[0] >> 4 == 4 && packet.get(9) == Some(&17);
