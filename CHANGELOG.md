@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 and follows [Semantic Versioning](https://semver.org/).
 
+## [0.2.1] - 2026-11-18
+
+### CI/CD ⚙️
+
+- Open the release PR as the organisation's ci app (#18)
+
+### Changed 🔧
+
+- Move the wire format tests into tests/ (#17)
+
+### Tests ✅
+
+- Cover every parameter, peer flag, split dump and a working link on the module (#16)
+
 ## [0.2.0] - 2026-11-16
 
 ### Breaking changes 💥
