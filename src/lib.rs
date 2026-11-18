@@ -12,11 +12,6 @@ mod message;
 mod peer;
 mod range;
 
-// test data are using hard coded little endian byte order, not for big-endian
-#[cfg(not(target_endian = "big"))]
-#[cfg(test)]
-mod test;
-
 pub use netlink_packet_wireguard::{
     WireguardAddressFamily as AmneziaWireguardAddressFamily,
     WireguardAllowedIp as AmneziaWireguardAllowedIp,
