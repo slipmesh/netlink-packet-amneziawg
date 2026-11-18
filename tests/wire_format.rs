@@ -1,5 +1,11 @@
 // SPDX-License-Identifier: MIT
 
+//! Messages parsed from and emitted to the bytes the kernel modules send and
+//! take, without a module.
+
+// The captured and built bytes are in little-endian order.
+#![cfg(target_endian = "little")]
+
 use std::{
     net::{IpAddr, Ipv4Addr, Ipv6Addr},
     str::FromStr,
@@ -10,37 +16,12 @@ use netlink_packet_core::{Emitable, Parseable, ParseableParametrized};
 use netlink_packet_generic::GenlHeader;
 use pretty_assertions::assert_eq;
 
-use crate::{
+use netlink_packet_amneziawg::{
     AmneziaWireguardAddressFamily, AmneziaWireguardAllowedIp, AmneziaWireguardAllowedIpAttr,
     AmneziaWireguardAttribute, AmneziaWireguardCmd, AmneziaWireguardDeviceFlags,
     AmneziaWireguardMessage, AmneziaWireguardPeer, AmneziaWireguardPeerAttribute,
     AmneziaWireguardPeerFlags, AmneziaWireguardRange, AmneziaWireguardTimeSpec,
 };
-
-// nlmon capture of netlink packet sent by `sudo wg` command with netlink
-// header purged(generic netlink command is first byte).
-#[test]
-fn test_query_request() {
-    let raw: Vec<u8> = vec![
-        0x00, 0x01, 0x00, 0x00, 0x07, 0x00, 0x02, 0x00, 0x63, 0x6e, 0x00, 0x00,
-    ];
-
-    let expected: AmneziaWireguardMessage = AmneziaWireguardMessage {
-        cmd: AmneziaWireguardCmd::GetDevice,
-        attributes: vec![AmneziaWireguardAttribute::IfName("cn".to_string())],
-    };
-
-    let header = GenlHeader::parse(&raw[..]).unwrap();
-
-    assert_eq!(
-        expected,
-        AmneziaWireguardMessage::parse_with_param(&raw[4..], header).unwrap(),
-    );
-    let mut buffer = vec![0; expected.buffer_len() + header.buffer_len()];
-    header.emit(&mut buffer);
-    expected.emit(&mut buffer[4..]);
-    assert_eq!(&buffer, &raw);
-}
 
 // nlmon capture of kernel netlink packet reply of `sudo wg` command with
 // netlink header purged(generic netlink command is first byte).

@@ -20,7 +20,7 @@
 - Public types are `AmneziaWireguard*`, so they can be used next to the upstream `Wireguard*`
   types. Variants keep the upstream name where the attribute is shared.
 - Netlink constants carry the kernel UAPI name and value: `WGDEVICE_A_*`, `WGPEER_A_*`.
-- Unit tests are named `test_<subject>` for the attribute or behaviour they pin:
+- Tests are named `test_<subject>` for the attribute or behaviour they pin:
   `test_device_peer_wire_format`, `test_keepalive_range_roundtrip`.
 
 ## Error handling
@@ -38,10 +38,11 @@
 
 - One module per netlink nesting level: `message.rs` for the family, `attribute.rs` for device
   attributes, `peer.rs` for peers; `range.rs` holds the AmneziaWG range wire format.
-- Tests of the wire format sit in `src/test.rs`, compiled on little-endian targets only because
-  their byte captures are little-endian. A helper with no wire bytes, such as `range.rs`, keeps
-  its tests in a `#[cfg(test)] mod tests` at the end of its own file. Tests that need the kernel
-  module sit in `tests/integration.rs` and skip themselves without it.
+- Tests of the wire format sit in `tests/wire_format.rs` and go through the public API only,
+  compiled on little-endian targets only because their byte captures are little-endian. A helper
+  with no wire bytes, such as `range.rs`, keeps its tests in a `#[cfg(test)] mod tests` at the end
+  of its own file. Tests that need the kernel module sit in `tests/integration.rs` and skip
+  themselves without it.
 - A change to the wire format comes with a test that pins the bytes, not only a roundtrip: a
   roundtrip passes when emit and parse are wrong the same way.
 

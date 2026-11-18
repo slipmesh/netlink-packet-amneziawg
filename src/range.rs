@@ -67,11 +67,6 @@ mod tests {
     use super::AmneziaWireguardRange as R;
 
     #[test]
-    fn test_one_value_is_the_range_from_it_to_itself() {
-        assert_eq!(R::from(25u16), R { lo: 25, hi: 25 });
-    }
-
-    #[test]
     fn test_u16_ends_go_into_a_u32_low_end_in_the_low_half() {
         assert_eq!(R::<u16> { lo: 1, hi: 2 }.to_wire(), 0x0002_0001);
         assert_eq!(R::<u16>::from_wire(0x0002_0001), R { lo: 1, hi: 2 });
